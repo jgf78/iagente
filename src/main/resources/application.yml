@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: IAgente
+  ai:
+    ollama:
+      base-url: http://64.110.119.234:11434
+      chat:
+        model: qwen2.5:3b
+
