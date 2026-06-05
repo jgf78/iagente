@@ -3,6 +3,8 @@ server:
 spring:
   application:
     name: IAgente
+  jackson:
+    time-zone: Europe/Madrid
   ai:
     ollama:
       base-url: http://64.110.119.234:11434
@@ -18,3 +20,11 @@ spring:
     ddl-auto: none
    show-sql: false
 
+logging:
+   file:
+     path: ./target/
+     name: ${spring.application.name}
+     level:
+       com.julian: DEBUG
+       org.springframework.boot: INFO
+       org.springframework.web: INFO
