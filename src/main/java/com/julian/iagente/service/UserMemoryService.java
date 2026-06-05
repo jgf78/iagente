@@ -76,6 +76,10 @@ public class UserMemoryService {
                      String key,
                      String value) {
 
+        if (isRedundant(userId, key, value)) {
+            return; 
+        }
+        
         repo.findByUserIdAndMemoryKey(userId, key)
                 .ifPresentOrElse(existing -> {
 
@@ -97,5 +101,13 @@ public class UserMemoryService {
 
     public List<UserMemory> getMemory(String userId) {
         return repo.findByUserId(userId);
+    }
+    
+    private boolean isRedundant(String userId, String key, String newValue) {
+
+        return repo.findByUserIdAndMemoryKey(userId, key)
+                .map(existing -> existing.getMemoryValue()
+                        .equalsIgnoreCase(newValue))
+                .orElse(false);
     }
 }
