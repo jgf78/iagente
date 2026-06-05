@@ -7,11 +7,13 @@ spring:
     time-zone: Europe/Madrid
   ai:
     ollama:
-      base-url: http://64.110.119.234:11434
+      # base-url: http://64.110.119.234:11434
+      base-url: http://ollama:11434
       chat:
         model: qwen2.5:3b
   datasource:
-    url: jdbc:postgresql://64.110.119.234:5432/iagente
+    # url: jdbc:postgresql://64.110.119.234:5432/iagente
+    url: jdbc:postgresql://iagente-postgres:5432/iagente
     username: iagente
     password: iagente
     driver-class-name: org.postgresql.Driver
