@@ -1,3 +1,5 @@
+server:
+  port: 8080
 spring:
   application:
     name: IAgente
@@ -6,4 +8,13 @@ spring:
       base-url: http://64.110.119.234:11434
       chat:
         model: qwen2.5:3b
+  datasource:
+    url: jdbc:postgresql://64.110.119.234:5432/iagente
+    username: iagente
+    password: iagente
+    driver-class-name: org.postgresql.Driver
+  jpa:
+   hibernate:
+    ddl-auto: none
+   show-sql: false
 
