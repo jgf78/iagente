@@ -1,11 +1,12 @@
 package com.julian.iagente.service;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.entity.UserMemory;
 import com.julian.iagente.repository.UserMemoryRepository;
 
@@ -14,61 +15,84 @@ public class UserMemoryService {
 
     private final ChatClient chatClient;
     private final UserMemoryRepository repo;
+    private final ObjectMapper objectMapper;
 
-    public UserMemoryService(ChatClient chatClient, UserMemoryRepository repo) {
+    public UserMemoryService(ChatClient chatClient,
+                             UserMemoryRepository repo,
+                             ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.repo = repo;
+        this.objectMapper = objectMapper;
     }
 
     public void extractAndSave(String userId, String message) {
 
-        String response = chatClient.prompt().system("""
-                    Extrae hechos importantes del usuario.
-                    Devuelve SOLO JSON en este formato:
+        String response = chatClient.prompt()
+                .system("""
+                    Extrae únicamente hechos permanentes o relevantes del usuario.
 
-                    {
-                      "key": "value"
-                    }
+                    Devuelve EXCLUSIVAMENTE JSON válido.
 
-                    Si no hay nada importante, devuelve {}
-                """).user(message).call().content();
+                    Ejemplos:
 
-        if (response == null || response.contains("{}")) {
-            return;
-        }
+                    {"color_favorito":"verde"}
+
+                    {"ciudad":"Madrid","lenguaje":"Java"}
+
+                    Si no hay información relevante devuelve:
+
+                    {}
+                    """)
+                .user(message)
+                .call()
+                .content();
 
         try {
-            String cleaned = response.replace("{", "").replace("}", "").replace("\"", "");
 
-            String[] parts = cleaned.split(":");
+            Map<String, String> memories =
+                    objectMapper.readValue(
+                            response,
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {});
 
-            if (parts.length == 2) {
-                save(userId, parts[0].trim(), parts[1].trim());
-            }
+            memories.forEach((key, value) -> {
+
+                if (key != null &&
+                    value != null &&
+                    !key.isBlank() &&
+                    !value.isBlank()) {
+
+                    save(userId, key, value);
+                }
+            });
 
         } catch (Exception e) {
-            // fallback silencioso
+
+            System.err.println("Error parseando memoria:");
+            System.err.println(response);
         }
     }
 
-    public void save(String userId, String key, String value) {
+    public void save(String userId,
+                     String key,
+                     String value) {
 
-        Optional<UserMemory> existing = repo.findByUserIdAndMemoryKey(userId, key);
+        repo.findByUserIdAndMemoryKey(userId, key)
+                .ifPresentOrElse(existing -> {
 
-        if (existing.isPresent()) {
+                    existing.setMemoryValue(value);
 
-            UserMemory memory = existing.get();
+                    repo.save(existing);
 
-            memory.setMemoryValue(value);
+                }, () -> {
 
-            repo.save(memory);
+                    UserMemory memory = UserMemory.builder()
+                            .userId(userId)
+                            .memoryKey(key)
+                            .memoryValue(value)
+                            .build();
 
-        } else {
-
-            UserMemory memory = UserMemory.builder().userId(userId).memoryKey(key).memoryValue(value).build();
-
-            repo.save(memory);
-        }
+                    repo.save(memory);
+                });
     }
 
     public List<UserMemory> getMemory(String userId) {

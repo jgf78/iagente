@@ -1,5 +1,6 @@
 package com.julian.iagente.service;
 
+import java.util.Collections;
 import java.util.List;
 
 import org.springframework.ai.chat.client.ChatClient;
@@ -38,7 +39,9 @@ public class AgentService {
 
         // 4. Recuperar historial reciente
         List<ChatMessage> history =
-                chatRepo.findTop10ByUserIdOrderByCreatedAtAsc(userId);
+                chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
+
+        Collections.reverse(history);
 
         // 5. Construir contexto
         StringBuilder context = new StringBuilder();
