@@ -4,5 +4,5 @@ services:
     image: jgf78/iagente:latest
     container_name: iagente_backend
     ports:
-      - "8080:8080"
+      - "8082:8080"
     restart: unless-stopped
