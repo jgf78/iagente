@@ -18,6 +18,8 @@ import com.julian.iagente.model.ContextPayload;
 import com.julian.iagente.model.RouteDecision;
 import com.julian.iagente.model.WebResult;
 import com.julian.iagente.repository.ChatMessageRepository;
+import com.julian.iagente.service.tool.CalendarService;
+import com.julian.iagente.service.tool.WeatherService;
 
 @Service
 public class AgentService {
@@ -33,13 +35,18 @@ public class AgentService {
     private final ObjectMapper objectMapper;
     private final AgentPersonaService personaService;
 
+    private final WeatherService weatherService;
+    private final CalendarService calendarService;
+
     public AgentService(ChatClient chatClient,
                         ChatMessageRepository chatRepo,
                         UserMemoryService userMemoryService,
                         QueryRouterService queryRouterService,
                         WebSearchService webSearchService,
                         ObjectMapper objectMapper,
-                        AgentPersonaService personaService) {
+                        AgentPersonaService personaService,
+                        WeatherService weatherService,
+                        CalendarService calendarService) {
 
         this.chatClient = chatClient;
         this.chatRepo = chatRepo;
@@ -48,6 +55,8 @@ public class AgentService {
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
         this.personaService = personaService;
+        this.weatherService = weatherService;
+        this.calendarService = calendarService;
     }
 
     public String chat(String userId, String message) {
@@ -62,8 +71,7 @@ public class AgentService {
 
         userMemoryService.extractAndSave(userId, message);
 
-        List<UserMemory> memories =
-                userMemoryService.getMemory(userId);
+        List<UserMemory> memories = userMemoryService.getMemory(userId);
 
         List<ChatMessage> history =
                 chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
@@ -72,10 +80,6 @@ public class AgentService {
                 queryRouterService.decide(message);
 
         log.info("ROUTER DECISION -> {}", decision);
-
-        // =====================================
-        // PERSONALITY
-        // =====================================
 
         AgentPersona persona = personaService.getPersona(userId);
 
@@ -87,13 +91,7 @@ public class AgentService {
         style: %s
         verbosity: %s
         language: %s
-
-        RULES:
-        - Always respect nickname as identity
-        - Never invent identity outside this block
-        - Adapt response tone and style accordingly
-        """
-        .formatted(
+        """.formatted(
                 persona.nickname(),
                 persona.tone(),
                 persona.style(),
@@ -101,14 +99,9 @@ public class AgentService {
                 persona.language()
         );
 
-        // =====================================
-        // MEMORY
-        // =====================================
-
         List<String> memoryList = new ArrayList<>();
 
         if (decision.useMemory()) {
-
             memoryList = memories.stream()
                     .map(m -> m.getMemoryKey() + ": " + m.getMemoryValue())
                     .toList();
@@ -116,69 +109,80 @@ public class AgentService {
 
         log.info("MEMORY FOUND -> {}", memoryList);
 
-        // =====================================
-        // WEB
-        // =====================================
-
         List<String> webList = new ArrayList<>();
 
         if (decision.useWeb()) {
 
-            String webQuery = decision.webQuery();
+            try {
+                List<WebResult> results =
+                        webSearchService.search(decision.webQuery());
 
-            if (!isValidWebQuery(webQuery, message)) {
+                results.stream()
+                        .limit(5)
+                        .forEach(r -> webList.add("""
+                                TITLE: %s
+                                URL: %s
+                                CONTENT: %s
+                                """.formatted(r.title(), r.url(), r.snippet())));
 
-                log.warn("WEB QUERY INVALID -> DISABLING WEB");
-                webList.add("WEB_SKIPPED_INVALID_QUERY");
-
-            } else {
-
-                try {
-
-                    log.info("WEB SEARCH -> {}", webQuery);
-
-                    List<WebResult> results =
-                            webSearchService.search(webQuery);
-
-                    if (results == null || results.isEmpty()) {
-
-                        webList.add("WEB_EMPTY");
-                        log.warn("WEB RESULT EMPTY");
-
-                    } else {
-
-                        results.stream()
-                                .limit(5)
-                                .forEach(r -> {
-
-                                    String item =
-                                            """
-                                            TITLE: %s
-                                            URL: %s
-                                            CONTENT: %s
-                                            """
-                                                    .formatted(
-                                                            r.title(),
-                                                            r.url(),
-                                                            r.snippet());
-
-                                    webList.add(item);
-                                });
-
-                        log.info("WEB RESULTS -> {}", webList.size());
-                    }
-
-                } catch (Exception e) {
-
-                    log.error("WEB ERROR", e);
-                    webList.add("WEB_ERROR");
-                }
+            } catch (Exception e) {
+                log.error("WEB ERROR", e);
+                webList.add("WEB_ERROR");
             }
         }
 
-        // =====================================
-        // HISTORY
-        // =====================================
+        // ==========================
+        // TOOL EXECUTION
+        // ==========================
+
+        List<String> toolList = new ArrayList<>();
+
+        String tool = decision.tool();
+
+        if ("WEATHER".equals(tool)) {
+
+            String city = clean(decision.toolInput());
+
+            log.info("WEATHER TOOL -> {}", city);
+
+            if (!city.isBlank()) {
+                String weather = weatherService.getWeather(city);
+
+                toolList.add("""
+                        DATA: %s
+                        """.formatted(weather));
+            }
+        }
+
+        if ("CALENDAR".equals(tool)) {
+
+            String rawDate = clean(decision.toolInput());
+
+            String date = normalizeDate(rawDate, message);
+
+            log.info("CALENDAR TOOL -> raw: {}, normalized: {}", rawDate, date);
+
+            String calendar = calendarService.getAgenda(date);
+
+            toolList.add("""
+                    DATA: %s
+                    """.formatted(calendar));
+        }
+
+        // ==========================
+        // TOOL BYPASS
+        // ==========================
+
+        if (!toolList.isEmpty()) {
+
+            log.info("TOOL RESPONSE MODE (bypass LLM)");
+
+            String toolResponse = toolList.get(0);
+
+            save(userId, "assistant", toolResponse);
+
+            return toolResponse;
+        }
 
         List<String> historyList =
                 history.stream()
@@ -188,51 +192,28 @@ public class AgentService {
 
         log.info("HISTORY -> {}", historyList);
 
-        // =====================================
-        // CONTEXT JSON
-        // =====================================
-
         String context;
 
         try {
-
             ContextPayload payload =
-                    new ContextPayload(
-                            memoryList,
-                            webList,
-                            historyList);
+                    new ContextPayload(memoryList, webList, historyList);
 
             context =
-                    objectMapper
-                            .writerWithDefaultPrettyPrinter()
+                    objectMapper.writerWithDefaultPrettyPrinter()
                             .writeValueAsString(payload);
 
         } catch (Exception e) {
-
             log.error("ERROR BUILDING CONTEXT", e);
-
-            context = """
-                    {
-                      "error":"context_build_failed"
-                    }
-                    """;
+            context = "{ \"error\":\"context_build_failed\" }";
         }
 
         log.info("FINAL CONTEXT SENT TO LLM:");
         log.info("\n{}", context);
 
-        // =====================================
-        // DATE CONTEXT
-        // =====================================
-
         String today = LocalDate.now()
                 .format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
 
         String year = String.valueOf(LocalDate.now().getYear());
-
-        // =====================================
-        // LLM
-        // =====================================
 
         String response = chatClient.prompt()
                 .system("""
@@ -246,28 +227,21 @@ FECHA SISTEMA:
 - Fecha completa: %s
 - Año actual: %s
 
-REGLAS CRÍTICAS:
-
-1. MEMORY solo si es explícito.
-2. WEB solo si contiene evidencia fiable.
-3. Si WEB_EMPTY o WEB_ERROR → ignóralo.
-4. NUNCA inventes datos personales.
-5. NUNCA inventes hechos.
-6. Si no hay evidencia suficiente responde EXACTAMENTE:
-   "No dispongo de información suficiente para responder con certeza."
-
-7. HISTORY solo ayuda a interpretar la pregunta.
-8. PROHIBIDO mezclar MEMORY y WEB.
-
-Responde SIEMPRE en Español.
+REGLAS:
+- TOOL > ALL
+- No inventes datos
+- Responde siempre en español
 """.formatted(personalityBlock, today, year))
                 .user("""
-Pregunta actual:
+Pregunta:
 %s
 
 Contexto:
 %s
-""".formatted(message, context))
+
+TOOLS:
+%s
+""".formatted(message, context, toolList))
                 .call()
                 .content();
 
@@ -278,39 +252,88 @@ Contexto:
         return response;
     }
 
-    private boolean isValidWebQuery(String webQuery, String message) {
+    private String normalizeDate(String input, String originalMessage) {
 
-        if (webQuery == null || webQuery.isBlank()) return false;
-
-        if (webQuery.length() < 6) return false;
-
-        String q = webQuery.toLowerCase();
-
-        if (q.contains("mi ") || q.contains("me ") || q.contains("recuerdas")) {
-            return false;
+        if (input == null || input.isBlank()) {
+            return LocalDate.now().toString();
         }
 
-        if (q.equals(message.toLowerCase())) {
-            return true;
+        LocalDate today = LocalDate.now();
+        String normalizedInput = input.trim().toLowerCase();
+        String message = originalMessage == null ? "" : originalMessage.toLowerCase();
+
+        // =====================================
+        // RELATIVOS
+        // =====================================
+        if (normalizedInput.contains("hoy")) return today.toString();
+        if (normalizedInput.contains("mañana")) return today.plusDays(1).toString();
+        if (normalizedInput.contains("ayer")) return today.minusDays(1).toString();
+
+        // =====================================
+        // PARSEO FECHAS (ISO O ES)
+        // =====================================
+        LocalDate parsed = parseDate(normalizedInput);
+
+        if (parsed == null) {
+            return today.toString();
         }
 
-        if (q.split(" ").length < 3) {
-            return false;
+        // =====================================
+        // AJUSTE AÑO
+        // =====================================
+        if (message.contains("este año")) {
+            parsed = parsed.withYear(today.getYear());
+        } else if (message.contains("año pasado")) {
+            parsed = parsed.withYear(today.getYear() - 1);
+        } else if (message.contains("próximo año") || message.contains("proximo año")) {
+            parsed = parsed.withYear(today.getYear() + 1);
         }
 
-        return true;
+        // =====================================
+        // AJUSTE MES
+        // =====================================
+        if (message.contains("este mes")) {
+            parsed = parsed.withMonth(today.getMonthValue()).withYear(today.getYear());
+        } else if (message.contains("mes pasado")) {
+            LocalDate t = today.minusMonths(1);
+            parsed = parsed.withMonth(t.getMonthValue()).withYear(t.getYear());
+        } else if (message.contains("próximo mes") || message.contains("proximo mes")) {
+            LocalDate t = today.plusMonths(1);
+            parsed = parsed.withMonth(t.getMonthValue()).withYear(t.getYear());
+        }
+
+        return parsed.toString();
     }
 
-    private void save(String userId,
-                      String role,
-                      String content) {
+    private LocalDate parseDate(String input) {
 
+        try {
+            if (input.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                return LocalDate.parse(input);
+            }
+
+            if (input.matches("\\d{2}/\\d{2}/\\d{4}")) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+                return LocalDate.parse(input, formatter);
+            }
+
+        } catch (Exception e) {
+            return null;
+        }
+
+        return null;
+    }
+    
+    private String clean(String input) {
+        if (input == null) return "";
+        return input.trim();
+    }
+
+    private void save(String userId, String role, String content) {
         ChatMessage msg = new ChatMessage();
-
         msg.setUserId(userId);
         msg.setRole(role);
         msg.setContent(content);
-
         chatRepo.save(msg);
     }
 }

@@ -1,64 +1,174 @@
 package com.julian.iagente.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.model.RouteDecision;
 
 @Service
 public class QueryRouterService {
 
-    private final ChatClient chatClient;
-    private final ObjectMapper objectMapper;
+    private static final Logger log = LoggerFactory.getLogger(QueryRouterService.class);
 
-    public QueryRouterService(ChatClient chatClient,
-                              ObjectMapper objectMapper) {
+    private final ChatClient chatClient;
+
+    public QueryRouterService(ChatClient chatClient) {
         this.chatClient = chatClient;
-        this.objectMapper = objectMapper;
     }
 
     public RouteDecision decide(String message) {
 
-        String response = chatClient.prompt()
-                .system("""
-                        Eres un clasificador de consultas.
+        log.info("ROUTER INPUT -> {}", message);
 
-                        Debes decidir si la pregunta necesita:
+        RouteDecision decision = chatClient.prompt().system("""
+                                        Eres un clasificador de consultas.
 
-                        - memoria del usuario (datos personales)
-                        - búsqueda web (hechos externos actuales)
-                        - conocimiento general del modelo
+                                        Debes decidir si la consulta requiere:
 
-                        REGLAS CRÍTICAS:
+                                        - MEMORY (datos personales del usuario)
+                                        - WEB (información externa o actual)
+                                        - LLM (conocimiento general)
+                                        - TOOL (servicios especializados)
 
-                        1. Si la pregunta contiene "mi", "me", "yo", "tengo", "preferido", "favorito"
-                           y está relacionada con el usuario → MEMORY = true, WEB = false
+                                        TOOLS DISPONIBLES:
 
-                        2. Si es una pregunta de actualidad externa (noticias, resultados, política, deportes recientes)
-                           → WEB = true
+                                        WEATHER
+                                        - tiempo
+                                        - clima
+                                        - temperatura
+                                        - lluvia
+                                        - previsión meteorológica
 
-                        3. Si es conocimiento general → LLM = true
+                                        CALENDAR
+                                        - agenda
+                                        - calendario
+                                        - eventos
+                                        - reuniones
 
-                        4. NUNCA uses web para información personal del usuario
+                                        =========================
+                                        REGLAS CRÍTICAS
+                                        =========================
 
-                        Devuelve SOLO JSON válido:
+                                        1. MEMORY:
+                                        - datos personales del usuario
 
-                        {
-                          "useMemory": boolean,
-                          "useWeb": boolean,
-                          "useLlm": boolean,
-                          "webQuery": "string"
-                        }
-                        """)
-                .user(message)
-                .call()
-                .content();
+                                        2. WEATHER:
+                                        tool="WEATHER"
+                                        toolInput = SOLO ciudad o localización limpia
 
-        try {
-            return objectMapper.readValue(response, RouteDecision.class);
-        } catch (Exception e) {
-            return new RouteDecision(true, false, true, "");
-        }
+                                        Ejemplos:
+                                        - "qué tiempo hace en Madrid"
+                                          → Madrid
+
+                                        - "lloverá en Alcorcón"
+                                          → Alcorcón
+
+                                        3. CALENDAR:
+                                        tool="CALENDAR"
+                                        toolInput = fecha en formato YYYY-MM-DD
+
+                                        Reglas:
+                                        - "hoy" → fecha actual
+                                        - "mañana" → fecha actual + 1 día
+                                        - "ayer" → fecha actual - 1 día
+
+                                        4. WEB:
+
+                                        Usar WEB para cualquier información externa que pueda cambiar con el tiempo
+                                        o que requiera datos actuales, verificados o recientes.
+                        
+                                        Incluye:
+                        
+                                        - noticias de cualquier temática
+                                        - política y gobiernos
+                                        - economía y mercados financieros
+                                        - deportes y competiciones
+                                        - resultados de partidos
+                                        - calendarios deportivos
+                                        - famosos y actualidad del corazón
+                                        - tecnología y lanzamientos
+                                        - eventos públicos
+                                        - conciertos, festivales y ferias
+                                        - meteorología (si no aplica WEATHER)
+                                        - horarios y fechas oficiales
+                                        - precios, cotizaciones y estadísticas actuales
+                                        - elecciones y resultados electorales
+                                        - información sobre empresas, organizaciones o personas públicas
+                                        - cualquier consulta que contenga palabras como:
+                                          hoy, ayer, mañana, actual, actualmente,
+                                          última hora, últimas noticias, reciente,
+                                          este año, próximo, próximo partido,
+                                          clasificación, ranking, resultado
+                        
+                                        Ejemplos:
+                        
+                                        "cuando juega España en el mundial 2026"
+                                        → WEB
+                        
+                                        "resultado del Madrid ayer"
+                                        → WEB
+                        
+                                        "quién ganó la Champions"
+                                        → WEB
+                        
+                                        "últimas noticias sobre OpenAI"
+                                        → WEB
+                        
+                                        "quién es el presidente actual de Francia"
+                                        → WEB
+                        
+                                        "precio actual del Bitcoin"
+                                        → WEB
+                        
+                                        "qué está pasando en Ucrania"
+                                        → WEB
+                        
+                                        "elecciones en Estados Unidos"
+                                        → WEB
+                        
+                                        Respuesta:
+                        
+                                        {
+                                          "useMemory": false,
+                                          "useWeb": true,
+                                          "useLlm": false,
+                                          "webQuery": "<consulta original>",
+                                          "tool": "NONE",
+                                          "toolInput": ""
+                                        }
+
+                                        5. LLM:
+                                        conocimiento general
+
+                                        6. REGLA ABSOLUTA:
+                                        - toolInput NO debe contener años inventados
+                                        - toolInput debe ser EXACTAMENTE lo que dice el usuario
+                                        - NO transformes fechas
+                                        - NO conviertas a YYYY-MM-DD
+
+                                        =========================
+                                        REGLAS DE SALIDA
+                                        =========================
+
+                                        - DEVUELVE SOLO UN OBJETO JSON
+                                        - PROHIBIDO texto adicional
+                                        - PROHIBIDO múltiples JSON
+                                        - PROHIBIDO explicaciones
+
+                                        FORMATO:
+
+                                        {
+                                          "useMemory": false,
+                                          "useWeb": false,
+                                          "useLlm": false,
+                                          "webQuery": "",
+                                          "tool": "NONE",
+                                          "toolInput": ""
+                                        }
+                                        """).user(message).call().entity(RouteDecision.class);
+
+        return decision;
     }
 }
