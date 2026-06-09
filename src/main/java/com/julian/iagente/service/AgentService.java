@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.entity.ChatMessage;
 import com.julian.iagente.entity.UserMemory;
+import com.julian.iagente.model.AgentPersona;
 import com.julian.iagente.model.ContextPayload;
 import com.julian.iagente.model.RouteDecision;
 import com.julian.iagente.model.WebResult;
@@ -30,13 +31,15 @@ public class AgentService {
     private final QueryRouterService queryRouterService;
     private final WebSearchService webSearchService;
     private final ObjectMapper objectMapper;
+    private final AgentPersonaService personaService;
 
     public AgentService(ChatClient chatClient,
                         ChatMessageRepository chatRepo,
                         UserMemoryService userMemoryService,
                         QueryRouterService queryRouterService,
                         WebSearchService webSearchService,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        AgentPersonaService personaService) {
 
         this.chatClient = chatClient;
         this.chatRepo = chatRepo;
@@ -44,6 +47,7 @@ public class AgentService {
         this.queryRouterService = queryRouterService;
         this.webSearchService = webSearchService;
         this.objectMapper = objectMapper;
+        this.personaService = personaService;
     }
 
     public String chat(String userId, String message) {
@@ -70,6 +74,34 @@ public class AgentService {
         log.info("ROUTER DECISION -> {}", decision);
 
         // =====================================
+        // PERSONALITY
+        // =====================================
+
+        AgentPersona persona = personaService.getPersona(userId);
+
+        String personalityBlock = """
+        AGENT_PERSONA:
+
+        nickname: %s
+        tone: %s
+        style: %s
+        verbosity: %s
+        language: %s
+
+        RULES:
+        - Always respect nickname as identity
+        - Never invent identity outside this block
+        - Adapt response tone and style accordingly
+        """
+        .formatted(
+                persona.nickname(),
+                persona.tone(),
+                persona.style(),
+                persona.verbosity(),
+                persona.language()
+        );
+
+        // =====================================
         // MEMORY
         // =====================================
 
@@ -85,7 +117,7 @@ public class AgentService {
         log.info("MEMORY FOUND -> {}", memoryList);
 
         // =====================================
-        // WEB (HARDENED)
+        // WEB
         // =====================================
 
         List<String> webList = new ArrayList<>();
@@ -190,7 +222,7 @@ public class AgentService {
         log.info("\n{}", context);
 
         // =====================================
-        // DATE CONTEXT (NEW - FIXED)
+        // DATE CONTEXT
         // =====================================
 
         String today = LocalDate.now()
@@ -204,38 +236,31 @@ public class AgentService {
 
         String response = chatClient.prompt()
                 .system("""
+%s
+
+=====================================
+
 Eres un asistente estricto basado en CONTEXTO.
 
 FECHA SISTEMA:
 - Fecha completa: %s
 - Año actual: %s
 
-REGLA CRÍTICA:
-- Para preguntas sobre fecha, día o año, usa SIEMPRE esta información.
-- Está PROHIBIDO decir que no sabes la fecha.
-
-El contexto contiene:
-
-MEMORY → datos personales del usuario
-WEB → información externa
-HISTORY → conversación previa
-
 REGLAS CRÍTICAS:
 
 1. MEMORY solo si es explícito.
 2. WEB solo si contiene evidencia fiable.
-3. Si WEB contiene WEB_EMPTY o WEB_ERROR → ignóralo completamente.
+3. Si WEB_EMPTY o WEB_ERROR → ignóralo.
 4. NUNCA inventes datos personales.
-5. NUNCA inventes eventos, deportes o noticias.
-6. Si no hay evidencia suficiente:
-   responde EXACTAMENTE:
+5. NUNCA inventes hechos.
+6. Si no hay evidencia suficiente responde EXACTAMENTE:
    "No dispongo de información suficiente para responder con certeza."
 
 7. HISTORY solo ayuda a interpretar la pregunta.
-8. Está PROHIBIDO mezclar MEMORY y WEB como fuente única.
+8. PROHIBIDO mezclar MEMORY y WEB.
 
 Responde SIEMPRE en Español.
-""".formatted(today, year))
+""".formatted(personalityBlock, today, year))
                 .user("""
 Pregunta actual:
 %s
@@ -252,10 +277,6 @@ Contexto:
 
         return response;
     }
-
-    // =====================================
-    // WEB VALIDATION
-    // =====================================
 
     private boolean isValidWebQuery(String webQuery, String message) {
 
