@@ -226,18 +226,6 @@ Mañana en Madrid se esperan máximas de 31°C y cielos despejados.
 
 ---
 
-# 🔮 Próximas Mejoras
-
-* [ ] Memoria vectorial (RAG)
-* [ ] Integración con Google Calendar
-* [ ] Sistema de tareas y recordatorios
-* [ ] Soporte multiusuario avanzado
-* [ ] Dashboard de administración
-* [ ] Integración con WhatsApp y Telegram
-* [ ] Sistema de herramientas (Tools)
-
----
-
 # 📄 Licencia
 
 Este proyecto se distribuye bajo licencia MIT.
