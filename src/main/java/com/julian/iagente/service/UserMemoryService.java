@@ -1,8 +1,10 @@
 package com.julian.iagente.service;
 
 import java.text.Normalizer;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +25,8 @@ public class UserMemoryService {
     private final UserMemoryRepository repo;
     private final ObjectMapper objectMapper;
 
+    private final Map<String, String> childIdentityCache = new HashMap<>();
+
     public UserMemoryService(ChatClient chatClient, UserMemoryRepository repo, ObjectMapper objectMapper) {
         this.chatClient = chatClient;
         this.repo = repo;
@@ -35,93 +39,157 @@ public class UserMemoryService {
         public String value;
     }
 
-    private static final List<String> ALLOWED_ATTRIBUTES = List.of(
-            "nombre",
-            "fecha_nacimiento",
-            "edad",
-            "ciudad",
-            "gustos",
-            "pareja",
-            "trabajo"
-    );
+    private static final List<String> ALLOWED_ATTRIBUTES = List.of("nombre", "fecha_nacimiento", "edad", "ciudad",
+            "gustos", "pareja", "trabajo");
 
-    private static final List<String> ALLOWED_SUBJECTS = List.of(
-            "self",
-            "pareja",
-            "hijo"
-    );
+    private static final List<String> ALLOWED_SUBJECTS = List.of("self", "pareja", "hijo");
 
     public void extractAndSave(String userId, String message) {
 
         String response = chatClient.prompt().system("""
-                Eres un sistema de extracción de memoria ESTRICTO.
+                Eres un extractor de memoria estructurada EXTREMADAMENTE RIGUROSO.
 
                 Devuelve SOLO JSON válido.
 
-                FORMATO:
+                FORMATO OBLIGATORIO:
+                Debes devolver SIEMPRE un array plano de objetos JSON.
 
                 [
                   {
                     "subject": "self | pareja | hijo",
-                    "attribute": "nombre normalizado",
-                    "value": "valor exacto del texto"
+                    "attribute": "nombre | fecha_nacimiento | edad | ciudad | gustos | pareja | trabajo",
+                    "value": "texto exacto del mensaje"
                   }
                 ]
 
-                REGLAS CRÍTICAS:
+                ========================
+                REGLAS CRÍTICAS
+                ========================
 
                 1. SUBJECTS PERMITIDOS:
-                   - self
-                   - pareja
-                   - hijo
+                - self
+                - pareja
+                - hijo
 
-                2. "hijo" se usa para cualquier hijo del usuario.
+                2. ATRIBUTOS PERMITIDOS (OBLIGATORIO ELEGIR SOLO UNO):
+                - nombre
+                - fecha_nacimiento
+                - edad
+                - ciudad
+                - gustos
+                - pareja
+                - trabajo
 
-                3. SI HAY VARIOS HIJOS:
-                   - usa el nombre en VALUE
-                   - subject SIEMPRE = "hijo"
+                🚨 REGLA MÁS IMPORTANTE:
+                - "attribute" DEBE SER UN SOLO VALOR
+                - PROHIBIDO usar separadores como: "|", ",", "o"
+                - PROHIBIDO listar opciones
+                - PROHIBIDO múltiples atributos en un solo campo
 
-                4. PROHIBIDO:
-                   - nombres propios en subject
-                   - inventar subjects nuevos
+                ❌ INCORRECTO:
+                "nombre | fecha_nacimiento | edad"
 
-                5. attributes permitidos:
-                   - nombre
-                   - fecha_nacimiento
-                   - edad
-                   - ciudad
-                   - gustos
-                   - pareja
-                   - trabajo
+                ✅ CORRECTO:
+                "fecha_nacimiento"
 
-                6. No infieras datos.
+                3. VALUE:
+                - copiar EXACTAMENTE del mensaje
+                - NUNCA resumir
+                - NUNCA interpretar
+                - NUNCA corregir fechas
 
-                7. Si no hay memoria → []
+                4. HIJOS:
+                - "hijo" es genérico
+                - SOLO crear identidad cuando exista nombre explícito
+                - si aparece nombre + dato → usar subject "hijo"
 
-                8. OUTPUT SOLO JSON.
-                """)
-                .user(message)
-                .call()
-                .content();
+                5. SELF:
+                - SOLO usar si el sujeto es el usuario claramente
+
+                6. PROHIBIDO:
+                - arrays dentro de arrays
+                - objetos vacíos
+                - inferir relaciones
+                - mezclar atributos
+                - generar texto explicativo
+
+                7. SI NO HAY MEMORIA → []
+
+                8. OUTPUT:
+                - SOLO JSON
+                - SIN markdown
+                - SIN texto adicional
+
+                9. 🚨 VALIDACIÓN FINAL OBLIGATORIA:
+                Antes de responder verifica:
+
+                - attribute SOLO puede ser UNA palabra
+                - NO puede contener espacios
+                - NO puede contener "|"
+                - NO puede contener múltiples valores
+                
+                10. SI EL MENSAJE ES UNA PREGUNTA:
+
+                DEVUELVE []
+                
+                Ejemplos:
+                
+                Usuario:
+                ¿Cómo se llaman mis hijos?
+                
+                Respuesta:
+                []
+                
+                Usuario:
+                ¿Cuándo nació Pablo?
+                
+                Respuesta:
+                []
+                
+                Usuario:
+                ¿Qué edad tiene mi hijo?
+                
+                Respuesta:
+                []
+                
+                NUNCA inventes datos para completar la respuesta.
+                """).user(message).call().content();
 
         log.info("MEMORY EXTRACTOR RESPONSE -> {}", response);
 
         try {
 
-            List<MemoryItem> memories = objectMapper.readValue(
-                    response,
-                    new TypeReference<List<MemoryItem>>() {}
-            );
+            if (response == null || response.isBlank() || response.contains("[,") || response.equals("[]")) {
+                return;
+            }
+
+            List<MemoryItem> memories = objectMapper.readValue(response, new TypeReference<List<MemoryItem>>() {
+            });
 
             for (MemoryItem m : memories) {
 
-                if (m == null) continue;
+                if (m == null)
+                    continue;
 
                 String subject = normalizeSubject(m.subject);
                 String attribute = normalizeAttribute(m.attribute);
+
+                if (!ALLOWED_ATTRIBUTES.contains(attribute)) {
+                    log.warn("REJECTED ATTRIBUTE -> {}", attribute);
+                    continue;
+                }
+                if (attribute.contains("|")) {
+                    log.warn("REJECTED MULTI ATTRIBUTE -> {}", attribute);
+                    continue;
+                }
+
                 String value = m.value == null ? null : m.value.trim();
 
+                // ==========================
+                // HARD SAFETY CHECKS
+                // ==========================
                 if (isBlank(subject) || isBlank(attribute) || isBlank(value)) {
+                    log.warn("REJECTED EMPTY MEMORY -> subject={}, attribute={}, value={}", subject, attribute, value);
                     continue;
                 }
 
@@ -140,7 +208,7 @@ public class UserMemoryService {
                     continue;
                 }
 
-                String normalizedSubject = expandChildSubject(subject, value);
+                String normalizedSubject = resolveChildSubject(userId, m, message);
 
                 save(userId, normalizedSubject, attribute, value);
             }
@@ -152,20 +220,54 @@ public class UserMemoryService {
         }
     }
 
-    /**
-     * 🔥 CLAVE: evita colisión entre hijos
-     * ejemplo:
-     * hijo + Pablo -> hijo:pablo
-     */
-    private String expandChildSubject(String subject, String value) {
+    private String resolveChildSubject(String userId, MemoryItem m, String originalMessage) {
 
-        if (!"hijo".equals(subject)) {
-            return subject;
+        if (!"hijo".equals(m.subject)) {
+            return m.subject;
         }
 
-        String normalizedName = normalize(value);
+        if ("nombre".equals(m.attribute)) {
+            String name = extractChildName(m.value);
+            if (name != null) {
+                String normalized = normalize(name);
+                childIdentityCache.put(userId, normalized);
+                return "hijo:" + normalized;
+            }
+        }
 
-        return "hijo:" + normalizedName;
+        // Buscar en cache primero
+        String cached = childIdentityCache.get(userId);
+        if (cached != null) {
+            return "hijo:" + cached;
+        }
+
+        // 🔑 CLAVE: inferir desde el mensaje completo, no desde m.value
+        String inferred = extractChildName(originalMessage);
+        if (inferred != null) {
+            String normalized = normalize(inferred);
+            childIdentityCache.put(userId, normalized);
+            return "hijo:" + normalized;
+        }
+
+        return "hijo:unknown";
+    }
+
+    private String extractChildName(String value) {
+
+        if (value == null)
+            return null;
+
+        String[] tokens = value.split(" ");
+
+        if (tokens.length > 0) {
+            String first = tokens[0].trim();
+
+            if (Character.isUpperCase(first.charAt(0))) {
+                return first;
+            }
+        }
+
+        return null;
     }
 
     public void save(String userId, String subject, String attribute, String value) {
@@ -188,11 +290,7 @@ public class UserMemoryService {
 
             log.info("MEMORY INSERT -> {} = {}", key, value);
 
-            UserMemory memory = UserMemory.builder()
-                    .userId(userId)
-                    .memoryKey(key)
-                    .memoryValue(value)
-                    .build();
+            UserMemory memory = UserMemory.builder().userId(userId).memoryKey(key).memoryValue(value).build();
 
             repo.save(memory);
         });
@@ -203,38 +301,27 @@ public class UserMemoryService {
     }
 
     private boolean isRedundant(String userId, String key, String newValue) {
-
         return repo.findByUserIdAndMemoryKey(userId, key)
-                .map(existing -> existing.getMemoryValue().equalsIgnoreCase(newValue))
-                .orElse(false);
+                .map(existing -> existing.getMemoryValue().equalsIgnoreCase(newValue)).orElse(false);
     }
 
     private String normalizeSubject(String subject) {
 
-        if (subject == null) return null;
+        if (subject == null)
+            return null;
 
         String s = normalize(subject);
 
-        if (s.contains("yo") ||
-            s.contains("me") ||
-            s.contains("mi") ||
-            s.contains("tengo") ||
-            s.contains("self") ||
-            s.contains("usuario")) {
+        if (s.contains("yo") || s.contains("me") || s.contains("mi") || s.contains("tengo") || s.contains("self")
+                || s.contains("usuario")) {
             return "self";
         }
 
-        if (s.contains("mujer") ||
-            s.contains("esposa") ||
-            s.contains("pareja") ||
-            s.contains("novia")) {
+        if (s.contains("mujer") || s.contains("esposa") || s.contains("pareja") || s.contains("novia")) {
             return "pareja";
         }
 
-        if (s.contains("hijo") ||
-            s.contains("hija") ||
-            s.contains("niño") ||
-            s.contains("niña")) {
+        if (s.contains("hijo") || s.contains("hija") || s.contains("niño") || s.contains("niña")) {
             return "hijo";
         }
 
@@ -247,21 +334,18 @@ public class UserMemoryService {
 
         return switch (a) {
 
-            case "nacimiento" -> "fecha_nacimiento";
-            case "fecha_de_nacimiento" -> "fecha_nacimiento";
+        case "nacimiento" -> "fecha_nacimiento";
+        case "fecha_de_nacimiento" -> "fecha_nacimiento";
 
-            case "lugar_de_residencia",
-                 "residencia",
-                 "vive_en" -> "ciudad";
+        case "lugar_de_residencia", "residencia", "vive_en" -> "ciudad";
 
-            default -> a;
+        default -> a;
         };
     }
 
     private String normalize(String value) {
 
-        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "");
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD).replaceAll("\\p{M}", "");
 
         return normalized.trim().toLowerCase(Locale.ROOT);
     }
@@ -272,11 +356,11 @@ public class UserMemoryService {
 
     private boolean isInvalidValue(String value) {
 
-        if (value == null) return true;
-
-        if (value.matches(".*\\d{4}-\\d{4}.*")) {
+        if (value == null)
             return true;
-        }
+
+        if (value.matches(".*\\d{4}-\\d{4}.*"))
+            return true;
 
         return false;
     }
