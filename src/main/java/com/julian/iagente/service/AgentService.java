@@ -79,11 +79,12 @@ public class AgentService {
 
         userMemoryService.extractAndSave(userId, message);
 
-        List<UserMemory> memories = userMemoryService.getMemory(userId);
-
         List<ChatMessage> history =
                 chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
 
+        // ==========================
+        // GREETINGS
+        // ==========================
         if (isSmallTalk(message)) {
             log.info("SMALL TALK DETECTED -> bypass router");
 
@@ -94,32 +95,23 @@ public class AgentService {
                     .content();
         }
         
+        // ==========================
+        // ROUTE DECISION
+        // ==========================
         RouteDecision decision =
                 queryRouterService.decide(message);
 
         log.info("ROUTER DECISION -> {}", decision);
 
-        AgentPersona persona = personaService.getPersona(userId);
-
-        String personalityBlock = """
-        AGENT_PERSONA:
-
-        nickname: %s
-        tone: %s
-        style: %s
-        verbosity: %s
-        language: %s
-        """.formatted(
-                persona.nickname(),
-                persona.tone(),
-                persona.style(),
-                persona.verbosity(),
-                persona.language()
-        );
+        // ==========================
+        // PERSONALITY BOT
+        // ==========================
+        String personalityBlock = getPersonalityBotByUserId(userId);
 
         // ==========================
         // MEMORY
         // ==========================
+        List<UserMemory> memories = userMemoryService.getMemory(userId);
         List<String> memoryList = memories.stream()
                 .map(m -> toNaturalMemory(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
@@ -127,52 +119,13 @@ public class AgentService {
         log.info("MEMORY FOUND -> {}", memoryList);
 
         // ==========================
-        // WEB (PROTECTED)
+        // WEB 
         // ==========================
         List<String> webList = new ArrayList<>();
 
-        boolean isPersonalQuestion =
-                message.toLowerCase().contains("mi ") ||
-                message.toLowerCase().contains("mujer") ||
-                message.toLowerCase().contains("pareja") ||
-                message.toLowerCase().contains("hijo");
+        boolean isPersonalQuestion = isAPersonalQuestion(message);
 
-        if (decision.useWeb() && !isPersonalQuestion) {
-
-            try {
-
-                String query = decision.webQuery();
-
-                if (query == null || query.isBlank()) {
-                    query = message;
-                    log.warn("WEB QUERY VACIA -> fallback al mensaje original");
-                }
-
-                log.info("WEB SEARCH -> {}", query);
-
-                List<WebResult> results =
-                        webSearchService.search(query);
-
-                results.stream()
-                        .limit(5)
-                        .forEach(r -> webList.add("""
-                                TITLE: %s
-                                URL: %s
-                                CONTENT: %s
-                                """.formatted(
-                                        r.title(),
-                                        r.url(),
-                                        r.snippet()
-                                )));
-
-            } catch (Exception e) {
-
-                log.error("WEB ERROR", e);
-                webList.add("WEB_ERROR");
-            }
-        } else if (decision.useWeb() && isPersonalQuestion) {
-            log.warn("WEB BLOQUEADA -> pregunta personal detectada");
-        }
+        websearch(message, decision, webList, isPersonalQuestion);
 
         // ==========================
         // TOOL EXECUTION
@@ -181,31 +134,9 @@ public class AgentService {
 
         String tool = decision.tool();
 
-        if (TOOL_WEATHER.equals(tool)) {
+        toolWeather(decision, toolList, tool);
 
-            String city = extractCity(decision.toolInput());
-
-            log.info("WEATHER TOOL -> {}", city);
-
-            if (!city.isBlank()) {
-                String weather = weatherService.getWeather(city);
-
-                toolList.add("DATA: %s".formatted(weather));
-            }
-        }
-
-        if (TOOL_CALENDAR.equals(tool)) {
-
-            String rawDate = clean(decision.toolInput());
-
-            String date = normalizeDate(rawDate, message);
-
-            log.info("CALENDAR TOOL -> raw: {}, normalized: {}", rawDate, date);
-
-            String calendar = calendarService.getAgenda(date);
-
-            toolList.add("DATA: %s".formatted(calendar));
-        }
+        toolCalendar(message, decision, toolList, tool);
 
         // ==========================
         // TOOL BYPASS
@@ -235,23 +166,7 @@ public class AgentService {
         // ==========================
         // SAFE CONTEXT BUILD
         // ==========================
-        String context;
-
-        try {
-            ContextPayload payload =
-                    new ContextPayload(memoryList, webList, historyList);
-
-            context =
-                    objectMapper.writerWithDefaultPrettyPrinter()
-                            .writeValueAsString(payload);
-
-        } catch (Exception e) {
-            log.error("ERROR BUILDING CONTEXT", e);
-            context = "{ \"error\":\"context_build_failed\" }";
-        }
-
-        log.info("FINAL CONTEXT SENT TO LLM:");
-        log.info("\n{}", context);
+        String context = buildContext(memoryList, webList, historyList);
 
         // ==========================
         // SAFETY FALLBACK 
@@ -274,6 +189,14 @@ public class AgentService {
         // ==========================
         // LLM CALL
         // ==========================
+        String response = callLLM(message, personalityBlock, toolList, context);
+
+        save(userId, ASSISTANT, response);
+
+        return response;
+    }
+
+    private String callLLM(String message, String personalityBlock, List<String> toolList, String context) {
         String today = LocalDate.now()
                 .format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
 
@@ -311,10 +234,127 @@ TOOLS:
                 .content();
 
         log.info("LLM RESPONSE -> {}", response);
-
-        save(userId, ASSISTANT, response);
-
         return response;
+    }
+
+    private String buildContext(List<String> memoryList, List<String> webList, List<String> historyList) {
+        String context;
+
+        try {
+            ContextPayload payload =
+                    new ContextPayload(memoryList, webList, historyList);
+
+            context =
+                    objectMapper.writerWithDefaultPrettyPrinter()
+                            .writeValueAsString(payload);
+
+        } catch (Exception e) {
+            log.error("ERROR BUILDING CONTEXT", e);
+            context = "{ \"error\":\"context_build_failed\" }";
+        }
+
+        log.info("FINAL CONTEXT SENT TO LLM:");
+        log.info("\n{}", context);
+        return context;
+    }
+
+    private void toolCalendar(String message, RouteDecision decision, List<String> toolList, String tool) {
+        if (TOOL_CALENDAR.equals(tool)) {
+
+            String rawDate = clean(decision.toolInput());
+
+            String date = normalizeDate(rawDate, message);
+
+            log.info("CALENDAR TOOL -> raw: {}, normalized: {}", rawDate, date);
+
+            String calendar = calendarService.getAgenda(date);
+
+            toolList.add("DATA: %s".formatted(calendar));
+        }
+    }
+
+    private void toolWeather(RouteDecision decision, List<String> toolList, String tool) {
+        if (TOOL_WEATHER.equals(tool)) {
+
+            String city = extractCity(decision.toolInput());
+
+            log.info("WEATHER TOOL -> {}", city);
+
+            if (!city.isBlank()) {
+                String weather = weatherService.getWeather(city);
+
+                toolList.add("DATA: %s".formatted(weather));
+            }
+        }
+    }
+
+    private void websearch(String message, RouteDecision decision, List<String> webList, boolean isPersonalQuestion) {
+        if (decision.useWeb() && !isPersonalQuestion) {
+
+            try {
+
+                String query = decision.webQuery();
+
+                if (query == null || query.isBlank()) {
+                    query = message;
+                    log.warn("WEB QUERY VACIA -> fallback al mensaje original");
+                }
+
+                log.info("WEB SEARCH -> {}", query);
+
+                List<WebResult> results =
+                        webSearchService.search(query);
+
+                results.stream()
+                        .limit(5)
+                        .forEach(r -> webList.add("""
+                                TITLE: %s
+                                URL: %s
+                                CONTENT: %s
+                                """.formatted(
+                                        r.title(),
+                                        r.url(),
+                                        r.snippet()
+                                )));
+
+            } catch (Exception e) {
+
+                log.error("WEB ERROR", e);
+                webList.add("WEB_ERROR");
+            }
+        } else if (decision.useWeb() && isPersonalQuestion) {
+            log.warn("WEB BLOQUEADA -> pregunta personal detectada");
+        }
+    }
+
+    private boolean isAPersonalQuestion(String message) {
+        boolean isPersonalQuestion =
+                message.toLowerCase().contains("mi ") ||
+                message.toLowerCase().contains("mujer") ||
+                message.toLowerCase().contains("pareja") ||
+                message.toLowerCase().contains("hijo");
+        return isPersonalQuestion;
+    }
+
+    private String getPersonalityBotByUserId(String userId) {
+        AgentPersona persona = personaService.getPersona(userId);
+
+        String personalityBlock = """
+        AGENT_PERSONA:
+
+        nickname: %s
+        tone: %s
+        style: %s
+        verbosity: %s
+        language: %s
+        """.formatted(
+                persona.nickname(),
+                persona.tone(),
+                persona.style(),
+                persona.verbosity(),
+                persona.language()
+        );
+        return personalityBlock;
     }
 
     private String normalizeDate(String input, String originalMessage) {
