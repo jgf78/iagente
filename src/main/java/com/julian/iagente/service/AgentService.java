@@ -24,6 +24,14 @@ import com.julian.iagente.service.tool.WeatherService;
 @Service
 public class AgentService {
 
+    private static final String ASSISTANT = "assistant";
+
+    private static final String USER = "user";
+
+    private static final String TOOL_CALENDAR = "CALENDAR";
+
+    private static final String TOOL_WEATHER = "WEATHER";
+
     private static final Logger log =
             LoggerFactory.getLogger(AgentService.class);
 
@@ -67,7 +75,7 @@ public class AgentService {
         log.info("MESSAGE: {}", message);
         log.info("==================================================");
 
-        save(userId, "user", message);
+        save(userId, USER, message);
 
         userMemoryService.extractAndSave(userId, message);
 
@@ -173,7 +181,7 @@ public class AgentService {
 
         String tool = decision.tool();
 
-        if ("WEATHER".equals(tool)) {
+        if (TOOL_WEATHER.equals(tool)) {
 
             String city = extractCity(decision.toolInput());
 
@@ -186,7 +194,7 @@ public class AgentService {
             }
         }
 
-        if ("CALENDAR".equals(tool)) {
+        if (TOOL_CALENDAR.equals(tool)) {
 
             String rawDate = clean(decision.toolInput());
 
@@ -208,7 +216,7 @@ public class AgentService {
 
             String toolResponse = toolList.get(0);
 
-            save(userId, "assistant", toolResponse);
+            save(userId, ASSISTANT, toolResponse);
 
             return toolResponse;
         }
@@ -218,7 +226,7 @@ public class AgentService {
         // ==========================
         List<String> historyList =
                 history.stream()
-                        .filter(m -> "user".equals(m.getRole()))
+                        .filter(m -> USER.equals(m.getRole()))
                         .map(ChatMessage::getContent)
                         .toList();
 
@@ -246,7 +254,7 @@ public class AgentService {
         log.info("\n{}", context);
 
         // ==========================
-        // SAFETY FALLBACK (CRITICAL)
+        // SAFETY FALLBACK 
         // ==========================
         boolean hasNoMemory = memoryList.isEmpty();
         boolean hasNoWeb = webList.isEmpty();
@@ -259,7 +267,7 @@ public class AgentService {
 
             log.info("SAFE FALLBACK -> no memory / no web for personal question");
 
-            save(userId, "assistant", safeResponse);
+            save(userId, ASSISTANT, safeResponse);
             return safeResponse;
         }
 
@@ -304,7 +312,7 @@ TOOLS:
 
         log.info("LLM RESPONSE -> {}", response);
 
-        save(userId, "assistant", response);
+        save(userId, ASSISTANT, response);
 
         return response;
     }
