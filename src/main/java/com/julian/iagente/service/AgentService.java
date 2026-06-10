@@ -76,6 +76,16 @@ public class AgentService {
         List<ChatMessage> history =
                 chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
 
+        if (isSmallTalk(message)) {
+            log.info("SMALL TALK DETECTED -> bypass router");
+
+            return chatClient.prompt()
+                    .system("Eres un asistente amable. Responde saludo breve.")
+                    .user(message)
+                    .call()
+                    .content();
+        }
+        
         RouteDecision decision =
                 queryRouterService.decide(message);
 
@@ -99,19 +109,29 @@ public class AgentService {
                 persona.language()
         );
 
+        // ==========================
+        // MEMORY
+        // ==========================
         List<String> memoryList = new ArrayList<>();
 
-        if (decision.useMemory()) {
-            memoryList = memories.stream()
-                    .map(m -> m.getMemoryKey() + ": " + m.getMemoryValue())
-                    .toList();
-        }
+        memoryList = memories.stream()
+                .map(m -> toNaturalMemory(m.getMemoryKey(), m.getMemoryValue()))
+                .toList();
 
         log.info("MEMORY FOUND -> {}", memoryList);
 
+        // ==========================
+        // WEB (PROTECTED)
+        // ==========================
         List<String> webList = new ArrayList<>();
 
-        if (decision.useWeb()) {
+        boolean isPersonalQuestion =
+                message.toLowerCase().contains("mi ") ||
+                message.toLowerCase().contains("mujer") ||
+                message.toLowerCase().contains("pareja") ||
+                message.toLowerCase().contains("hijo");
+
+        if (decision.useWeb() && !isPersonalQuestion) {
 
             try {
 
@@ -119,7 +139,6 @@ public class AgentService {
 
                 if (query == null || query.isBlank()) {
                     query = message;
-
                     log.warn("WEB QUERY VACIA -> fallback al mensaje original");
                 }
 
@@ -143,15 +162,15 @@ public class AgentService {
             } catch (Exception e) {
 
                 log.error("WEB ERROR", e);
-
                 webList.add("WEB_ERROR");
             }
+        } else if (decision.useWeb() && isPersonalQuestion) {
+            log.warn("WEB BLOQUEADA -> pregunta personal detectada");
         }
 
         // ==========================
         // TOOL EXECUTION
         // ==========================
-
         List<String> toolList = new ArrayList<>();
 
         String tool = decision.tool();
@@ -165,9 +184,7 @@ public class AgentService {
             if (!city.isBlank()) {
                 String weather = weatherService.getWeather(city);
 
-                toolList.add("""
-                        DATA: %s
-                        """.formatted(weather));
+                toolList.add("DATA: %s".formatted(weather));
             }
         }
 
@@ -181,15 +198,12 @@ public class AgentService {
 
             String calendar = calendarService.getAgenda(date);
 
-            toolList.add("""
-                    DATA: %s
-                    """.formatted(calendar));
+            toolList.add("DATA: %s".formatted(calendar));
         }
 
         // ==========================
         // TOOL BYPASS
         // ==========================
-
         if (!toolList.isEmpty()) {
 
             log.info("TOOL RESPONSE MODE (bypass LLM)");
@@ -201,6 +215,9 @@ public class AgentService {
             return toolResponse;
         }
 
+        // ==========================
+        // HISTORY
+        // ==========================
         List<String> historyList =
                 history.stream()
                         .filter(m -> "user".equals(m.getRole()))
@@ -209,6 +226,9 @@ public class AgentService {
 
         log.info("HISTORY -> {}", historyList);
 
+        // ==========================
+        // SAFE CONTEXT BUILD
+        // ==========================
         String context;
 
         try {
@@ -227,6 +247,27 @@ public class AgentService {
         log.info("FINAL CONTEXT SENT TO LLM:");
         log.info("\n{}", context);
 
+        // ==========================
+        // SAFETY FALLBACK (CRITICAL)
+        // ==========================
+        boolean hasNoMemory = memoryList.isEmpty();
+        boolean hasNoWeb = webList.isEmpty();
+        boolean isPersonalNoData = isPersonalQuestion && hasNoMemory && hasNoWeb;
+
+        if (isPersonalNoData) {
+
+            String safeResponse =
+                    "No tengo información suficiente para responder a eso.";
+
+            log.info("SAFE FALLBACK -> no memory / no web for personal question");
+
+            save(userId, "assistant", safeResponse);
+            return safeResponse;
+        }
+
+        // ==========================
+        // LLM CALL
+        // ==========================
         String today = LocalDate.now()
                 .format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
 
@@ -246,7 +287,8 @@ FECHA SISTEMA:
 
 REGLAS:
 - TOOL > ALL
-- No inventes datos
+- NO INVENTES DATOS BAJO NINGÚN CONCEPTO
+- SI NO HAY INFORMACIÓN → RESPONDE: "No lo sé"
 - Responde siempre en español
 """.formatted(personalityBlock, today, year))
                 .user("""
@@ -277,47 +319,14 @@ TOOLS:
 
         LocalDate today = LocalDate.now();
         String normalizedInput = input.trim().toLowerCase();
-        String message = originalMessage == null ? "" : originalMessage.toLowerCase();
 
-        // =====================================
-        // RELATIVOS
-        // =====================================
         if (normalizedInput.contains("hoy")) return today.toString();
         if (normalizedInput.contains("mañana")) return today.plusDays(1).toString();
         if (normalizedInput.contains("ayer")) return today.minusDays(1).toString();
 
-        // =====================================
-        // PARSEO FECHAS (ISO O ES)
-        // =====================================
         LocalDate parsed = parseDate(normalizedInput);
 
-        if (parsed == null) {
-            return today.toString();
-        }
-
-        // =====================================
-        // AJUSTE AÑO
-        // =====================================
-        if (message.contains("este año")) {
-            parsed = parsed.withYear(today.getYear());
-        } else if (message.contains("año pasado")) {
-            parsed = parsed.withYear(today.getYear() - 1);
-        } else if (message.contains("próximo año") || message.contains("proximo año")) {
-            parsed = parsed.withYear(today.getYear() + 1);
-        }
-
-        // =====================================
-        // AJUSTE MES
-        // =====================================
-        if (message.contains("este mes")) {
-            parsed = parsed.withMonth(today.getMonthValue()).withYear(today.getYear());
-        } else if (message.contains("mes pasado")) {
-            LocalDate t = today.minusMonths(1);
-            parsed = parsed.withMonth(t.getMonthValue()).withYear(t.getYear());
-        } else if (message.contains("próximo mes") || message.contains("proximo mes")) {
-            LocalDate t = today.plusMonths(1);
-            parsed = parsed.withMonth(t.getMonthValue()).withYear(t.getYear());
-        }
+        if (parsed == null) return today.toString();
 
         return parsed.toString();
     }
@@ -340,7 +349,7 @@ TOOLS:
 
         return null;
     }
-    
+
     private String clean(String input) {
         if (input == null) return "";
         return input.trim();
@@ -352,5 +361,48 @@ TOOLS:
         msg.setRole(role);
         msg.setContent(content);
         chatRepo.save(msg);
+    }
+    
+    private String toNaturalMemory(String key, String value) {
+
+        if (key == null || value == null) return "";
+
+        if (key.contains("pareja:fecha_nacimiento")) {
+            return "La pareja del usuario nació el " + value;
+        }
+
+        if (key.contains("pareja:nombre")) {
+            return "La pareja del usuario se llama " + value;
+        }
+
+        if (key.contains("self:nombre")) {
+            return "El nombre del usuario es " + value;
+        }
+
+        if (key.contains("self:fecha_nacimiento")) {
+            return "El usuario nació el " + value;
+        }
+
+        if (key.contains("hijo") && key.contains("nombre")) {
+            return "El hijo del usuario se llama " + value;
+        }
+
+        if (key.contains("hijo") && key.contains("fecha_nacimiento")) {
+            return "El hijo del usuario nació el " + value;
+        }
+
+        return key + ": " + value;
+    }
+    
+    private boolean isSmallTalk(String message) {
+
+        String m = message.toLowerCase();
+
+        return m.contains("hola")
+            || m.contains("qué tal")
+            || m.contains("como estás")
+            || m.contains("buenos días")
+            || m.contains("buenos noches")
+            || m.contains("buenas tardes");
     }
 }
