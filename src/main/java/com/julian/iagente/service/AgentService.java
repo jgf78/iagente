@@ -112,9 +112,7 @@ public class AgentService {
         // ==========================
         // MEMORY
         // ==========================
-        List<String> memoryList = new ArrayList<>();
-
-        memoryList = memories.stream()
+        List<String> memoryList = memories.stream()
                 .map(m -> toNaturalMemory(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
 
