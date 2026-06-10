@@ -177,7 +177,7 @@ public class AgentService {
 
         if ("WEATHER".equals(tool)) {
 
-            String city = clean(decision.toolInput());
+            String city = extractCity(decision.toolInput());
 
             log.info("WEATHER TOOL -> {}", city);
 
@@ -404,5 +404,33 @@ TOOLS:
             || m.contains("buenos días")
             || m.contains("buenos noches")
             || m.contains("buenas tardes");
+    }
+    
+    private String extractCity(String text) {
+
+        if (text == null) {
+            return "";
+        }
+
+        String lower = text.toLowerCase();
+
+        String[] patterns = {
+                "tiempo en ",
+                "hace en ",
+                "clima en ",
+                "temperatura en ",
+                "en "
+        };
+
+        for (String pattern : patterns) {
+
+            int index = lower.lastIndexOf(pattern);
+
+            if (index >= 0) {
+                return text.substring(index + pattern.length()).trim();
+            }
+        }
+
+        return text.trim();
     }
 }
