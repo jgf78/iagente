@@ -114,8 +114,19 @@ public class AgentService {
         if (decision.useWeb()) {
 
             try {
+
+                String query = decision.webQuery();
+
+                if (query == null || query.isBlank()) {
+                    query = message;
+
+                    log.warn("WEB QUERY VACIA -> fallback al mensaje original");
+                }
+
+                log.info("WEB SEARCH -> {}", query);
+
                 List<WebResult> results =
-                        webSearchService.search(decision.webQuery());
+                        webSearchService.search(query);
 
                 results.stream()
                         .limit(5)
@@ -123,10 +134,16 @@ public class AgentService {
                                 TITLE: %s
                                 URL: %s
                                 CONTENT: %s
-                                """.formatted(r.title(), r.url(), r.snippet())));
+                                """.formatted(
+                                        r.title(),
+                                        r.url(),
+                                        r.snippet()
+                                )));
 
             } catch (Exception e) {
+
                 log.error("WEB ERROR", e);
+
                 webList.add("WEB_ERROR");
             }
         }

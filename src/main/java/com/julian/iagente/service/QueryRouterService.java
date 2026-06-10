@@ -22,6 +22,59 @@ public class QueryRouterService {
 
         log.info("ROUTER INPUT -> {}", message);
 
+        String msg = message.toLowerCase();
+
+        // =========================
+        // FAST ROUTING WEATHER
+        // =========================
+
+        if (msg.contains("tiempo")
+                || msg.contains("clima")
+                || msg.contains("llover")
+                || msg.contains("temperatura")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "WEATHER",
+                    message
+            );
+
+            log.info("ROUTER FAST DECISION -> {}", decision);
+
+            return decision;
+        }
+
+        // =========================
+        // FAST ROUTING CALENDAR
+        // =========================
+
+        if (msg.contains("agenda")
+                || msg.contains("calendario")
+                || msg.contains("evento")
+                || msg.contains("reunión")
+                || msg.contains("reunion")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "CALENDAR",
+                    message
+            );
+
+            log.info("ROUTER FAST DECISION -> {}", decision);
+
+            return decision;
+        }
+
+        // =========================
+        // LLM ROUTER
+        // =========================
+
         RouteDecision decision = chatClient.prompt().system("""
                                         Eres un clasificador de consultas.
 
@@ -174,6 +227,21 @@ public class QueryRouterService {
                                         Si existe duda entre WEB y LLM,
                                         elegir siempre WEB.
                                         """).user(message).call().entity(RouteDecision.class);
+        if (decision != null
+                && decision.useWeb()
+                && (decision.webQuery() == null || decision.webQuery().isBlank())) {
+
+            log.warn("WEB QUERY NULL -> usando mensaje original");
+
+            decision = new RouteDecision(
+                    decision.useMemory(),
+                    true,
+                    decision.useLlm(),
+                    message,
+                    decision.tool(),
+                    decision.toolInput()
+            );
+        }
 
         return decision;
     }
