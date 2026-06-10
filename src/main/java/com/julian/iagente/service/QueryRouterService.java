@@ -84,14 +84,13 @@ public class QueryRouterService {
                                         - noticias de cualquier temática
                                         - política y gobiernos
                                         - economía y mercados financieros
-                                        - deportes y competiciones
+                                        - noticias deportivas
                                         - resultados de partidos
                                         - calendarios deportivos
                                         - famosos y actualidad del corazón
                                         - tecnología y lanzamientos
                                         - eventos públicos
                                         - conciertos, festivales y ferias
-                                        - meteorología (si no aplica WEATHER)
                                         - horarios y fechas oficiales
                                         - precios, cotizaciones y estadísticas actuales
                                         - elecciones y resultados electorales
@@ -167,6 +166,13 @@ public class QueryRouterService {
                                           "tool": "NONE",
                                           "toolInput": ""
                                         }
+                                        
+                                        PRIORIDAD:
+
+                                        TOOL > WEB > MEMORY > LLM
+                                        
+                                        Si existe duda entre WEB y LLM,
+                                        elegir siempre WEB.
                                         """).user(message).call().entity(RouteDecision.class);
 
         return decision;
