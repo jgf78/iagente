@@ -84,9 +84,30 @@ public class QueryRouterService {
             log.info("ROUTER CALENDAR DECISION -> {}", decision);
             return decision;
         }
+        
+        // =========================
+        // 4. REMINDER TOOL
+        // =========================
+        if (msg.contains("recordatorio")
+                || msg.contains("avisame")
+                || msg.contains("recuerdame")
+                || msg.contains("aviso")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "REMINDER",
+                    message
+            );
+
+            log.info("ROUTER REMINDER DECISION -> {}", decision);
+            return decision;
+        }
 
         // =========================
-        // 4. LLM ROUTER
+        // 5. LLM ROUTER
         // =========================
         RouteDecision decision = chatClient.prompt()
                 .system("""
@@ -114,6 +135,10 @@ public class QueryRouterService {
                         CALENDAR TOOL:
                         tool = CALENDAR
                         toolInput = fecha (YYYY-MM-DD)
+                        
+                        REMINDER TOOL:
+                        tool = REMINDER
+                        toolInput = fecha (YYYY-MM-DD HH:mm)
 
                         WEB:
                         SOLO para información externa o actual:

@@ -1,6 +1,7 @@
 package com.julian.iagente.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +16,7 @@ import com.julian.iagente.entity.ChatMessage;
 import com.julian.iagente.entity.UserMemory;
 import com.julian.iagente.model.AgentPersona;
 import com.julian.iagente.model.ContextPayload;
+import com.julian.iagente.model.ReminderItem;
 import com.julian.iagente.model.RouteDecision;
 import com.julian.iagente.model.WebResult;
 import com.julian.iagente.repository.ChatMessageRepository;
@@ -31,6 +33,8 @@ public class AgentService {
     private static final String TOOL_CALENDAR = "CALENDAR";
 
     private static final String TOOL_WEATHER = "WEATHER";
+    
+    private static final String TOOL_REMINDER = "REMINDER";
 
     private static final Logger log =
             LoggerFactory.getLogger(AgentService.class);
@@ -45,6 +49,7 @@ public class AgentService {
 
     private final WeatherService weatherService;
     private final CalendarService calendarService;
+    private final ReminderService reminderService;
 
     public AgentService(ChatClient chatClient,
                         ChatMessageRepository chatRepo,
@@ -54,7 +59,8 @@ public class AgentService {
                         ObjectMapper objectMapper,
                         AgentPersonaService personaService,
                         WeatherService weatherService,
-                        CalendarService calendarService) {
+                        CalendarService calendarService,
+                        ReminderService reminderService) {
 
         this.chatClient = chatClient;
         this.chatRepo = chatRepo;
@@ -65,6 +71,7 @@ public class AgentService {
         this.personaService = personaService;
         this.weatherService = weatherService;
         this.calendarService = calendarService;
+        this.reminderService = reminderService;
     }
 
     public String chat(String userId, String message) {
@@ -132,11 +139,11 @@ public class AgentService {
         // ==========================
         List<String> toolList = new ArrayList<>();
 
-        String tool = decision.tool();
+        toolWeather(decision, toolList);
 
-        toolWeather(decision, toolList, tool);
-
-        toolCalendar(message, decision, toolList, tool);
+        toolCalendar(message, decision, toolList);
+        
+        toolReminder(message, decision, toolList, userId);
 
         // ==========================
         // TOOL BYPASS
@@ -258,8 +265,8 @@ TOOLS:
         return context;
     }
 
-    private void toolCalendar(String message, RouteDecision decision, List<String> toolList, String tool) {
-        if (TOOL_CALENDAR.equals(tool)) {
+    private void toolCalendar(String message, RouteDecision decision, List<String> toolList) {
+        if (TOOL_CALENDAR.equals(decision.tool())) {
 
             String rawDate = clean(decision.toolInput());
 
@@ -273,8 +280,8 @@ TOOLS:
         }
     }
 
-    private void toolWeather(RouteDecision decision, List<String> toolList, String tool) {
-        if (TOOL_WEATHER.equals(tool)) {
+    private void toolWeather(RouteDecision decision, List<String> toolList) {
+        if (TOOL_WEATHER.equals(decision.tool())) {
 
             String city = extractCity(decision.toolInput());
 
@@ -287,7 +294,102 @@ TOOLS:
             }
         }
     }
+    
+    private void toolReminder(String message,
+            RouteDecision decision,
+            List<String> toolList,
+            String userId) {
 
+        if (TOOL_REMINDER.equals(decision.tool())) {
+        
+            log.info("REMINDER TOOL RAW INPUT -> {}", decision.toolInput());
+            
+            String today = LocalDate.now().toString();
+            String year = String.valueOf(LocalDate.now().getYear());
+            
+            try {
+            
+            String response = chatClient.prompt()
+                    .system("""
+                            Eres un extractor de recordatorios.
+
+                            FECHA ACTUAL DEL SISTEMA:
+                            - Hoy: %s
+                            - Año actual: %s
+
+                            REGLAS IMPORTANTES:
+                            - "hoy" = %s
+                            - NUNCA uses años pasados o futuros inventados
+                            - SIEMPRE usa el año actual salvo que el usuario indique otro
+                            - Si evento es anual que se repite todos los años usa YEARLY
+                            - Si evento es mensual que se repite todos los meses usa MONTHLY
+                            - Si evento es semanal que se repite todas las semanas usa WEEKLY
+                            - Si evento es diario que se repite todos los dias usa DAILY
+                            - Si no informan recurrence, por defecto NONE
+
+                            Devuelve SOLO JSON válido.
+
+                            FORMATO:
+                            {
+                              "title": "texto del evento",
+                              "dateTime": "yyyy-MM-dd HH:mm",
+                              "endDateTime": "yyyy-MM-dd HH:mm",
+                              "recurrence": "DAILY | WEEKLY | MONTHLY | YEARLY | NONE"
+                            }
+
+                            REGLAS:
+                            - No inventes datos
+                            - Si falta hora, usa 09:00
+                            - Si falta fecha, usa HOY (%s)
+                            - Si no se especifica la fecha fin del recodatorio, se informa "endDateTime": ""
+                            """.formatted(today, year, today, today))
+                  .user("""
+                          Mensaje:
+                          %s
+                          """.formatted(message))
+                  .call()
+                  .content();
+            
+            log.info("REMINDER EXTRACTOR RESPONSE -> {}", response);
+            
+            ObjectMapper mapper = new ObjectMapper();
+            
+            ReminderItem item = mapper.readValue(response, ReminderItem.class);
+            
+            DateTimeFormatter formatter =
+                  DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+            
+            LocalDateTime dateTime =
+                  LocalDateTime.parse(item.dateTime(), formatter);
+            
+            LocalDateTime endDateTime = null;
+            
+            if (item.endDateTime() != null && !item.endDateTime().isBlank()) {
+                endDateTime = LocalDateTime.parse(item.endDateTime(), formatter);
+            }
+            
+            String recurrence =
+                  item.recurrence() != null ? item.recurrence() : "NONE";
+            
+            reminderService.save(
+                  userId,
+                  item.title(),
+                  dateTime,
+                  endDateTime,
+                  recurrence
+            );
+            
+            log.info("REMINDER SAVED -> title={}, dateTime={}, recurrence={}",
+                  item.title(), dateTime, recurrence);
+            
+            toolList.add("RECORDATORIO CREADO: " + item.title() + " el " + dateTime);
+            
+            } catch (Exception e) {
+                log.error("ERROR PARSING REMINDER", e);
+            }
+        }
+    }
+    
     private void websearch(String message, RouteDecision decision, List<String> webList, boolean isPersonalQuestion) {
         if (decision.useWeb() && !isPersonalQuestion) {
 
