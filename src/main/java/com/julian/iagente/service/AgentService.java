@@ -317,15 +317,37 @@ TOOLS:
                             - Hoy: %s
                             - Año actual: %s
 
-                            REGLAS IMPORTANTES:
-                            - "hoy" = %s
-                            - NUNCA uses años pasados o futuros inventados
-                            - SIEMPRE usa el año actual salvo que el usuario indique otro
-                            - Si evento es anual que se repite todos los años usa YEARLY
-                            - Si evento es mensual que se repite todos los meses usa MONTHLY
-                            - Si evento es semanal que se repite todas las semanas usa WEEKLY
-                            - Si evento es diario que se repite todos los dias usa DAILY
-                            - Si no informan recurrence, por defecto NONE
+                            REGLA CRÍTICA:
+
+                            "recurrence" DEBE SER NONE por defecto.
+                            
+                            SOLO puedes devolver:
+                            - DAILY
+                            - WEEKLY
+                            - MONTHLY
+                            - YEARLY
+                            
+                            si aparecen expresiones explícitas en el mensaje.
+                            
+                            Ejemplos:
+                            
+                            "cada día" -> DAILY
+                            "todos los días" -> DAILY
+                            
+                            "cada semana" -> WEEKLY
+                            "todas las semanas" -> WEEKLY
+                            
+                            "cada mes" -> MONTHLY
+                            "todos los meses" -> MONTHLY
+                            
+                            "cada año" -> YEARLY
+                            "todos los años" -> YEARLY
+                            
+                            Si NO aparece ninguna expresión de repetición:
+                            recurrence = NONE
+                            
+                            Está PROHIBIDO inferir repeticiones.
+                            Está PROHIBIDO asumir DAILY.
 
                             Devuelve SOLO JSON válido.
 
@@ -337,12 +359,7 @@ TOOLS:
                               "recurrence": "DAILY | WEEKLY | MONTHLY | YEARLY | NONE"
                             }
 
-                            REGLAS:
-                            - No inventes datos
-                            - Si falta hora, usa 09:00
-                            - Si falta fecha, usa HOY (%s)
-                            - Si no se especifica la fecha fin del recodatorio, se informa "endDateTime": ""
-                            """.formatted(today, year, today, today))
+                            """.formatted(today, year))
                   .user("""
                           Mensaje:
                           %s

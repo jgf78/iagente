@@ -7,12 +7,10 @@ import com.julian.iagente.entity.Reminder;
 
 public interface ReminderService {
 
-    List<Reminder> getUserReminders(String userId);
-
     List<Reminder> getPendingReminders();
-
-    void markAsSent(Long reminderId);
 
     Reminder save(String userId, String title, LocalDateTime reminderDate, LocalDateTime endReminderDate,
             String recurrence);
+
+    void processRecurrence(Reminder reminder);
 }

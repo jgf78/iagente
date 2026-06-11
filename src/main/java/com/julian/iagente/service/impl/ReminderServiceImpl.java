@@ -38,24 +38,55 @@ public class ReminderServiceImpl implements ReminderService {
     }
 
     @Override
-    public List<Reminder> getUserReminders(String userId) {
-        return reminderRepository.findByUserId(userId);
-    }
-
-    @Override
     public List<Reminder> getPendingReminders() {
         return reminderRepository
                 .findBySentFalseAndReminderDateLessThanEqual(LocalDateTime.now());
     }
 
     @Override
-    public void markAsSent(Long reminderId) {
+    public void processRecurrence(Reminder reminder) {
 
-        reminderRepository.findById(reminderId).ifPresent(reminder -> {
+        if ("NONE".equals(reminder.getRecurrence())) {
+
+            reminder.setSent(true);
+            reminderRepository.save(reminder);
+            return;
+        }
+
+        LocalDateTime nextDate = calculateNextDate(reminder);
+
+        if (reminder.getEndReminderDate() != null
+                && nextDate.isAfter(reminder.getEndReminderDate())) {
 
             reminder.setSent(true);
 
-            reminderRepository.save(reminder);
-        });
+        } else {
+
+            reminder.setReminderDate(nextDate);
+        }
+
+        reminderRepository.save(reminder);
     }
+    
+    private LocalDateTime calculateNextDate(Reminder reminder) {
+
+        return switch (reminder.getRecurrence()) {
+
+            case "DAILY" ->
+                    reminder.getReminderDate().plusDays(1);
+
+            case "WEEKLY" ->
+                    reminder.getReminderDate().plusWeeks(1);
+
+            case "MONTHLY" ->
+                    reminder.getReminderDate().plusMonths(1);
+
+            case "YEARLY" ->
+                    reminder.getReminderDate().plusYears(1);
+
+            default ->
+                    reminder.getReminderDate();
+        };
+    }
+
 }

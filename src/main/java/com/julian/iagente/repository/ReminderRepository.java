@@ -11,7 +11,7 @@ import com.julian.iagente.entity.Reminder;
 @Repository
 public interface ReminderRepository extends JpaRepository<Reminder, Long> {
 
-    List<Reminder> findByUserId(String userId);
-
     List<Reminder> findBySentFalseAndReminderDateLessThanEqual(LocalDateTime now);
+
+    List<Reminder> findByUserIdAndSentFalse(String userId);
 }
