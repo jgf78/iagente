@@ -219,7 +219,13 @@ public class QueryRouterService {
                         - noticias
                         - deportes
                         - política
-                        - resultados
+                        - resultados deportivos
+                        - resultados elecciones
+                        - noticias de corazon
+                        - noticias financieras
+                        - programacion television
+                        - noticias videojuegos
+                        - noticias musicales
                         - precios actuales
                         - eventos recientes
                         - que dia es hoy, que dia de la semana es hoy
