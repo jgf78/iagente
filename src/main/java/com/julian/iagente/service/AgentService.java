@@ -235,6 +235,8 @@ public class AgentService {
                 
                 Eres un asistente estricto basado en CONTEXTO.
                 
+                Formato de salida de las fechas dd/MM/yyyy hh:mm
+                
                 FECHA SISTEMA:
                 - Fecha completa: %s
                 - Año actual: %s
