@@ -146,9 +146,30 @@ public class QueryRouterService {
             log.info("ROUTER TODO DECISION -> {}", decision);
             return decision;
         }
+        
+        // =========================
+        // 7. TODO_LIST TOOL
+        // =========================
+        
+        if (msg.contains("marca la tarea ")
+                || msg.contains("comprar")
+                || msg.contains("completada la tarea")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "TODO_COMPLETE",
+                    message
+            );
+
+            log.info("ROUTER TODO_COMPLETE DECISION -> {}", decision);
+            return decision;
+        }
 
         // =========================
-        // 7. LLM ROUTER
+        // 8. LLM ROUTER
         // =========================
         RouteDecision decision = chatClient.prompt()
                 .system("""
@@ -188,6 +209,10 @@ public class QueryRouterService {
                         TODO_LIST TOOL:
                         tool = TODO_LIST
                         toolInput = ""
+                        
+                        TODO_COMPLETE TOOL:
+                        tool = TODO_COMPLETE
+                        toolInput = mensaje
 
                         WEB:
                         SOLO para información externa o actual:

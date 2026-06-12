@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,8 @@ public class AgentService {
     private static final String TOOL_TODO = "TODO";
     
     private static final String TOOL_TODO_LIST = "TODO_LIST";
+    
+    private static final String TOOL_TODO_COMPLETE = "TODO_COMPLETE";
 
     private static final Logger log =
             LoggerFactory.getLogger(AgentService.class);
@@ -157,6 +160,8 @@ public class AgentService {
         toolTodo(message, decision, toolList, userId);
         
         toolTodoList(decision, toolList, userId);
+        
+        toolTodoComplete(message, decision, toolList, userId);
 
         // ==========================
         // TOOL BYPASS
@@ -497,6 +502,36 @@ public class AgentService {
         }
 }
     
+    private void toolTodoComplete(String message,
+            RouteDecision decision,
+            List<String> toolList,
+            String userId) {
+
+    if (TOOL_TODO_COMPLETE.equals(decision.tool())) {
+    
+        String task = normalizeTodoText(decision.toolInput());
+        
+        log.info("TODO COMPLETE TOOL -> {}", task);
+        
+        List<Todo> todos = todoService.getPending(userId);
+        
+        Optional<Todo> match = todos.stream()
+                .filter(t -> normalizeTodoText(t.getTitle())
+                        .equalsIgnoreCase(task))
+                .findFirst();
+        
+        if (match.isPresent()) {
+        
+            todoService.markCompleted(match.get().getId());
+            
+            toolList.add("Tarea completada: " + task);
+            
+         } else {
+            toolList.add("No he encontrado esa tarea.");
+         }
+    }
+}
+    
     private void websearch(String message, RouteDecision decision, List<String> webList, boolean isPersonalQuestion) {
         if (decision.useWeb() && !isPersonalQuestion) {
 
@@ -687,5 +722,17 @@ public class AgentService {
         }
 
         return text.trim();
+    }
+    
+    private String normalizeTodoText(String text) {
+
+        return text.toLowerCase()
+                .replace("marca", "")
+                .replace("como completada", "")
+                .replace("completada", "")
+                .replace("completa", "")
+                .replace("he terminado", "")
+                .replace("ya hice", "")
+                .trim();
     }
 }
