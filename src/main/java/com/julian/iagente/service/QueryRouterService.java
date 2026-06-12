@@ -105,9 +105,50 @@ public class QueryRouterService {
             log.info("ROUTER REMINDER DECISION -> {}", decision);
             return decision;
         }
+        
+        // =========================
+        // 5. TODO TOOL
+        // =========================
+        if (msg.contains("apunta")
+                || msg.contains("lista")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "TODO",
+                    message
+            );
+
+            log.info("ROUTER TODO DECISION -> {}", decision);
+            return decision;
+        }
+        
+        // =========================
+        // 6. TODO_LIST TOOL
+        // =========================
+        
+        if (msg.contains("que tareas tengo ")
+                || msg.contains("tareas pendientes")
+                || msg.contains("mis tareas")
+                || msg.contains("listado de tareas")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    "TODO_LIST",
+                    message
+            );
+
+            log.info("ROUTER TODO DECISION -> {}", decision);
+            return decision;
+        }
 
         // =========================
-        // 5. LLM ROUTER
+        // 7. LLM ROUTER
         // =========================
         RouteDecision decision = chatClient.prompt()
                 .system("""
@@ -139,6 +180,14 @@ public class QueryRouterService {
                         REMINDER TOOL:
                         tool = REMINDER
                         toolInput = fecha (YYYY-MM-DD HH:mm)
+                        
+                        TODO TOOL:
+                        tool = TODO
+                        toolInput = mensaje
+                        
+                        TODO_LIST TOOL:
+                        tool = TODO_LIST
+                        toolInput = ""
 
                         WEB:
                         SOLO para información externa o actual:
@@ -148,6 +197,7 @@ public class QueryRouterService {
                         - resultados
                         - precios actuales
                         - eventos recientes
+                        - que dia es hoy, que dia de la semana es hoy
 
                         Si hay duda → WEB
 

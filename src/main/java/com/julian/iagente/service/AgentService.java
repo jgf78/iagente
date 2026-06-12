@@ -13,11 +13,13 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.entity.ChatMessage;
+import com.julian.iagente.entity.Todo;
 import com.julian.iagente.entity.UserMemory;
 import com.julian.iagente.model.AgentPersona;
 import com.julian.iagente.model.ContextPayload;
 import com.julian.iagente.model.ReminderItem;
 import com.julian.iagente.model.RouteDecision;
+import com.julian.iagente.model.TodoItem;
 import com.julian.iagente.model.WebResult;
 import com.julian.iagente.repository.ChatMessageRepository;
 import com.julian.iagente.service.tool.CalendarService;
@@ -35,6 +37,10 @@ public class AgentService {
     private static final String TOOL_WEATHER = "WEATHER";
     
     private static final String TOOL_REMINDER = "REMINDER";
+    
+    private static final String TOOL_TODO = "TODO";
+    
+    private static final String TOOL_TODO_LIST = "TODO_LIST";
 
     private static final Logger log =
             LoggerFactory.getLogger(AgentService.class);
@@ -50,6 +56,7 @@ public class AgentService {
     private final WeatherService weatherService;
     private final CalendarService calendarService;
     private final ReminderService reminderService;
+    private final TodoService todoService;
 
     public AgentService(ChatClient chatClient,
                         ChatMessageRepository chatRepo,
@@ -60,7 +67,8 @@ public class AgentService {
                         AgentPersonaService personaService,
                         WeatherService weatherService,
                         CalendarService calendarService,
-                        ReminderService reminderService) {
+                        ReminderService reminderService,
+                        TodoService todoService) {
 
         this.chatClient = chatClient;
         this.chatRepo = chatRepo;
@@ -72,6 +80,7 @@ public class AgentService {
         this.weatherService = weatherService;
         this.calendarService = calendarService;
         this.reminderService = reminderService;
+        this.todoService = todoService;
     }
 
     public String chat(String userId, String message) {
@@ -144,6 +153,10 @@ public class AgentService {
         toolCalendar(message, decision, toolList);
         
         toolReminder(message, decision, toolList, userId);
+        
+        toolTodo(message, decision, toolList, userId);
+        
+        toolTodoList(decision, toolList, userId);
 
         // ==========================
         // TOOL BYPASS
@@ -211,32 +224,32 @@ public class AgentService {
 
         String response = chatClient.prompt()
                 .system("""
-%s
-
-=====================================
-
-Eres un asistente estricto basado en CONTEXTO.
-
-FECHA SISTEMA:
-- Fecha completa: %s
-- Año actual: %s
-
-REGLAS:
-- TOOL > ALL
-- NO INVENTES DATOS BAJO NINGÚN CONCEPTO
-- SI NO HAY INFORMACIÓN → RESPONDE: "No lo sé"
-- Responde siempre en español
-""".formatted(personalityBlock, today, year))
-                .user("""
-Pregunta:
-%s
-
-Contexto:
-%s
-
-TOOLS:
-%s
-""".formatted(message, context, toolList))
+                %s
+                
+                =====================================
+                
+                Eres un asistente estricto basado en CONTEXTO.
+                
+                FECHA SISTEMA:
+                - Fecha completa: %s
+                - Año actual: %s
+                
+                REGLAS:
+                - TOOL > ALL
+                - NO INVENTES DATOS BAJO NINGÚN CONCEPTO
+                - SI NO HAY INFORMACIÓN → RESPONDE: "No lo sé"
+                - Responde siempre en español
+                """.formatted(personalityBlock, today, year))
+                                .user("""
+                Pregunta:
+                %s
+                
+                Contexto:
+                %s
+                
+                TOOLS:
+                %s
+                """.formatted(message, context, toolList))
                 .call()
                 .content();
 
@@ -302,7 +315,7 @@ TOOLS:
 
         if (TOOL_REMINDER.equals(decision.tool())) {
         
-            log.info("REMINDER TOOL RAW INPUT -> {}", decision.toolInput());
+            log.info("REMINDER TOOL INPUT -> {}", decision.toolInput());
             
             String today = LocalDate.now().toString();
             String year = String.valueOf(LocalDate.now().getYear());
@@ -406,6 +419,83 @@ TOOLS:
             }
         }
     }
+    
+    private void toolTodoList(
+            RouteDecision decision,
+            List<String> toolList,
+            String userId) {
+
+        if (TOOL_TODO_LIST.equals(decision.tool())) {
+        
+            log.info("TODO LIST TOOL");
+            
+            List<Todo> todos = todoService.getPending(userId);
+            
+            if (todos.isEmpty()) {
+                toolList.add("No tienes tareas pendientes.");
+                return;
+            }
+            
+            StringBuilder sb = new StringBuilder("Tareas pendientes:\n");
+            
+            for (int i = 0; i < todos.size(); i++) {
+                sb.append(i + 1)
+                .append(". ")
+                .append(todos.get(i).getTitle())
+                .append("\n");
+            }
+            
+            toolList.add(sb.toString());
+        }
+}
+    
+    private void toolTodo(String message,
+            RouteDecision decision,
+            List<String> toolList,
+            String userId) {
+
+        if (TOOL_TODO.equals(decision.tool())) {
+        
+            log.info("TODO TOOL INPUT -> {}", decision.toolInput());
+            
+            try {
+            
+             String response = chatClient.prompt()
+                     .system("""
+                             Eres un extractor de tareas TODO.
+            
+                             Devuelve SOLO JSON válido.
+            
+                             FORMATO:
+                             {
+                               "title": "texto de la tarea"
+                             }
+            
+                             REGLAS:
+                             - No inventes datos
+                             - No añadas fechas
+                             - No interpretes
+                             - Solo el título
+                             """)
+                     .user(message)
+                     .call()
+                     .content();
+            
+             log.info("TODO EXTRACTOR RESPONSE -> {}", response);
+            
+             ObjectMapper mapper = new ObjectMapper();
+            
+             TodoItem item = mapper.readValue(response, TodoItem.class);
+            
+             todoService.save(userId, item.title());
+            
+             toolList.add("TODO CREADO: " + item.title());
+            
+            } catch (Exception e) {
+             log.error("ERROR PARSING TODO", e);
+            }
+        }
+}
     
     private void websearch(String message, RouteDecision decision, List<String> webList, boolean isPersonalQuestion) {
         if (decision.useWeb() && !isPersonalQuestion) {
