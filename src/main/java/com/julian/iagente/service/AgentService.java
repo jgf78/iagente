@@ -15,12 +15,12 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.entity.ChatMessage;
 import com.julian.iagente.entity.Todo;
-import com.julian.iagente.entity.UserMemory;
 import com.julian.iagente.model.AgentPersona;
 import com.julian.iagente.model.ContextPayload;
 import com.julian.iagente.model.ReminderItem;
 import com.julian.iagente.model.RouteDecision;
 import com.julian.iagente.model.TodoItem;
+import com.julian.iagente.model.UserMemoryDTO;
 import com.julian.iagente.model.WebResult;
 import com.julian.iagente.repository.ChatMessageRepository;
 import com.julian.iagente.service.tool.CalendarService;
@@ -130,11 +130,12 @@ public class AgentService {
         // ==========================
         // MEMORY
         // ==========================
-        List<UserMemory> memories = userMemoryService.getMemory(userId);
-        List<String> memoryList = memories.stream()
-                .map(m -> toNaturalMemory(m.getMemoryKey(), m.getMemoryValue()))
-                .toList();
+        List<UserMemoryDTO> memories = userMemoryService.getMemory(userId);
 
+        List<String> memoryList = memories.stream()
+                .map(m -> toNaturalMemory(m.memoryKey(), m.memoryValue()))
+                .toList();
+        
         log.info("MEMORY FOUND -> {}", memoryList);
 
         // ==========================

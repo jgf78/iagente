@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.julian.iagente.entity.UserMemory;
+import com.julian.iagente.model.UserMemoryDTO;
 import com.julian.iagente.repository.UserMemoryRepository;
 
 @Service
@@ -196,8 +197,15 @@ public class UserMemoryService {
     }
 
     @Cacheable(value = "personas", key = "#userId")
-    public List<UserMemory> getMemory(String userId) {
-        return repo.findByUserId(userId);
+    public List<UserMemoryDTO> getMemory(String userId) {
+
+        return repo.findByUserId(userId)
+                .stream()
+                .map(m -> new UserMemoryDTO(
+                        m.getMemoryKey(),
+                        m.getMemoryValue()
+                ))
+                .toList();
     }
 
     private boolean isRedundant(String userId, String key, String newValue) {

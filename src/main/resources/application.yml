@@ -23,7 +23,15 @@ spring:
    hibernate:
     ddl-auto: none
    show-sql: false
+   
+  data:
+    redis:
+       host: redis
+       port: 6379
 
+  cache:
+    type: redis   
+   
 logging:
    file:
      path: ./target/
