@@ -709,9 +709,12 @@ public class AgentService {
 
         String[] patterns = {
                 "tiempo en ",
+                "tiempo de ",
                 "hace en ",
                 "clima en ",
+                "clima de ",
                 "temperatura en ",
+                "temperatura de ",
                 "en "
         };
 
