@@ -10,10 +10,7 @@ public class CalendarService {
     private final RestClient restClient =
             RestClient.create();
 
-    @Cacheable(
-            value = "calendar",
-            key = "#userId + ':' + #date"
-    )
+    @Cacheable(value = "calendar:agenda", key = "#date")
     public String getAgenda(String date) {
 
         return restClient.get()

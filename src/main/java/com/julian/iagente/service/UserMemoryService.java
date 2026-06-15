@@ -1,5 +1,7 @@
 package com.julian.iagente.service;
 
+
+
 import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
@@ -9,8 +11,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,23 +52,50 @@ public class UserMemoryService {
 
     public void extractAndSave(String userId, String message) {
 
-        String response = chatClient.prompt().system("""
-                Eres un extractor de memoria estructurada EXTREMADAMENTE RIGUROSO.
-                ... (RESTO DEL PROMPT SIN CAMBIOS)
-                """).user(message).call().content();
+        String response = chatClient.prompt()
+                .system("""
+                        Eres un extractor de memoria estructurada.
+
+                        REGLAS OBLIGATORIAS:
+                        - Devuelve ÚNICAMENTE JSON válido
+                        - NO expliques nada
+                        - NO texto adicional
+                        - NO markdown
+                        - NO frases tipo "claro", "aquí tienes"
+                        - SIEMPRE devuelve una lista JSON
+
+                        FORMATO OBLIGATORIO:
+                        [
+                          {
+                            "subject": "self|pareja|hijo",
+                            "attribute": "nombre|edad|ciudad|gustos|fecha_nacimiento|trabajo",
+                            "value": "string"
+                          }
+                        ]
+
+                        Si no hay memoria útil devuelve: []
+                        """)
+                .user(message)
+                .call()
+                .content();
 
         log.info("MEMORY EXTRACTOR RESPONSE -> {}", response);
 
         try {
 
-            if (response == null || response.isBlank()
-                    || response.contains("[,")
-                    || response.equals("[]")) {
+            if (response == null || response.isBlank()) {
+                return;
+            }
+
+            String json = extractJsonArray(response);
+
+            if (json == null) {
+                log.warn("MEMORY SKIPPED -> response is not valid JSON array");
                 return;
             }
 
             List<MemoryItem> memories = objectMapper.readValue(
-                    response,
+                    json,
                     new TypeReference<List<MemoryItem>>() {}
             );
 
@@ -118,54 +145,17 @@ public class UserMemoryService {
         }
     }
 
-    private String resolveChildSubject(String userId, MemoryItem m, String originalMessage) {
+    private String extractJsonArray(String response) {
+        int start = response.indexOf('[');
+        int end = response.lastIndexOf(']');
 
-        if (!"hijo".equals(m.subject)) {
-            return m.subject;
+        if (start == -1 || end == -1 || end <= start) {
+            return null;
         }
 
-        if ("nombre".equals(m.attribute)) {
-            String name = extractChildName(m.value);
-            if (name != null) {
-                String normalized = normalize(name);
-                childIdentityCache.put(userId, normalized);
-                return "hijo:" + normalized;
-            }
-        }
-
-        String cached = childIdentityCache.get(userId);
-        if (cached != null) {
-            return "hijo:" + cached;
-        }
-
-        String inferred = extractChildName(originalMessage);
-        if (inferred != null) {
-            String normalized = normalize(inferred);
-            childIdentityCache.put(userId, normalized);
-            return "hijo:" + normalized;
-        }
-
-        return "hijo:unknown";
+        return response.substring(start, end + 1);
     }
 
-    private String extractChildName(String value) {
-
-        if (value == null) return null;
-
-        String[] tokens = value.split(" ");
-
-        if (tokens.length > 0) {
-            String first = tokens[0].trim();
-
-            if (Character.isUpperCase(first.charAt(0))) {
-                return first;
-            }
-        }
-
-        return null;
-    }
-
-    @CacheEvict(value = "personas", key = "#userId")
     public void save(String userId, String subject, String attribute, String value) {
 
         String key = "persona:" + subject + ":" + attribute;
@@ -196,15 +186,10 @@ public class UserMemoryService {
         });
     }
 
-    @Cacheable(value = "personas", key = "#userId")
     public List<UserMemoryDTO> getMemory(String userId) {
-
         return repo.findByUserId(userId)
                 .stream()
-                .map(m -> new UserMemoryDTO(
-                        m.getMemoryKey(),
-                        m.getMemoryValue()
-                ))
+                .map(m -> new UserMemoryDTO(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
     }
 
@@ -214,8 +199,43 @@ public class UserMemoryService {
                 .orElse(false);
     }
 
-    private String normalizeSubject(String subject) {
+    private String resolveChildSubject(String userId, MemoryItem m, String originalMessage) {
+        if (!"hijo".equals(m.subject)) return m.subject;
 
+        if ("nombre".equals(m.attribute)) {
+            String name = extractChildName(m.value);
+            if (name != null) {
+                String normalized = normalize(name);
+                childIdentityCache.put(userId, normalized);
+                return "hijo:" + normalized;
+            }
+        }
+
+        String cached = childIdentityCache.get(userId);
+        if (cached != null) return "hijo:" + cached;
+
+        String inferred = extractChildName(originalMessage);
+        if (inferred != null) {
+            String normalized = normalize(inferred);
+            childIdentityCache.put(userId, normalized);
+            return "hijo:" + normalized;
+        }
+
+        return "hijo:unknown";
+    }
+
+    private String extractChildName(String value) {
+        if (value == null) return null;
+
+        String[] tokens = value.split(" ");
+        if (tokens.length > 0) {
+            String first = tokens[0].trim();
+            if (Character.isUpperCase(first.charAt(0))) return first;
+        }
+        return null;
+    }
+
+    private String normalizeSubject(String subject) {
         if (subject == null) return null;
 
         String s = normalize(subject);
@@ -240,7 +260,6 @@ public class UserMemoryService {
     }
 
     private String normalizeAttribute(String attribute) {
-
         String a = normalize(attribute);
 
         return switch (a) {
@@ -252,7 +271,6 @@ public class UserMemoryService {
     }
 
     private String normalize(String value) {
-
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "");
 
@@ -264,11 +282,8 @@ public class UserMemoryService {
     }
 
     private boolean isInvalidValue(String value) {
-
         if (value == null) return true;
-
         if (value.matches(".*\\d{4}-\\d{4}.*")) return true;
-
         return false;
     }
 }

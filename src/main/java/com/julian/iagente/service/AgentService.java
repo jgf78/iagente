@@ -700,7 +700,7 @@ public class AgentService {
     }
     
     private String extractCity(String text) {
-
+        
         if (text == null) {
             return "";
         }
