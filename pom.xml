@@ -83,12 +83,6 @@
             <artifactId>postgresql</artifactId>
         </dependency>
         
-        <!-- Jackson -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-
     </dependencies>
 
     <build>
