@@ -1,5 +1,6 @@
 package com.julian.iagente.service.tool;
 
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -9,6 +10,10 @@ public class CalendarService {
     private final RestClient restClient =
             RestClient.create();
 
+    @Cacheable(
+            value = "calendar",
+            key = "#userId + ':' + #date"
+    )
     public String getAgenda(String date) {
 
         return restClient.get()

@@ -49,7 +49,6 @@ public class UserMemoryService {
             "self", "pareja", "hijo"
     );
 
-    @CacheEvict(value = "personas", key = "#userId")
     public void extractAndSave(String userId, String message) {
 
         String response = chatClient.prompt().system("""
