@@ -481,8 +481,9 @@ public class UserMemoryService {
 
         return switch (a) {
             case "nacimiento" -> "fecha_nacimiento";
-            case "fecha_de_nacimiento" -> "fecha_nacimiento";
+            case "fecha_de_nacimiento", "cumpleaños" -> "fecha_nacimiento";
             case "lugar_de_residencia", "residencia", "vive_en" -> "ciudad";
+            case "aficiones", "hobbies", "hobby", "hobbie" -> "gustos";
             default -> a;
         };
     }
