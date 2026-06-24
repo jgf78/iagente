@@ -101,7 +101,12 @@ public class AgentService {
              return result;
          }
 
-        boolean memoryResult = userMemoryService.extractAndSave(userId, message);
+         boolean memoryResult = false;
+
+         if (!isMemoryQuestion(message)) {
+             memoryResult =
+                     userMemoryService.extractAndSave(userId, message);
+         }
         
         if (memoryResult) {
 
@@ -270,7 +275,7 @@ public class AgentService {
                             message);
 
             return result
-                    .map(UserMemoryDTO::memoryValue)
+                    .map(m -> formatMemoryAnswer(message, m))
                     .orElse("No lo sé");
         }else response = callLLM(message, personalityBlock, toolList, context);
         
@@ -651,12 +656,17 @@ public class AgentService {
     }
 
     private boolean isAPersonalQuestion(String message) {
-        boolean isPersonalQuestion =
-                message.toLowerCase().contains("mi ") ||
-                message.toLowerCase().contains("mujer") ||
-                message.toLowerCase().contains("pareja") ||
-                message.toLowerCase().contains("hijo");
-        return isPersonalQuestion;
+
+        String m = message.toLowerCase();
+
+        return m.contains("mi ")
+                || m.contains("me llamo")
+                || m.contains("como me llamo")
+                || m.contains("cómo me llamo")
+                || m.contains("quien soy")
+                || m.contains("qué sabes de mí")
+                || m.contains("pareja")
+                || m.contains("hijo");
     }
 
     private String getPersonalityBotByUserId(String userId) {
@@ -977,5 +987,39 @@ public class AgentService {
             }
 
         }.parse();
+    }
+    
+    private boolean isMemoryQuestion(String message) {
+
+        String m = message.toLowerCase();
+
+        return m.contains("como me llamo")
+                || m.contains("cómo me llamo")
+                || m.contains("qué sabes de mí")
+                || m.contains("que sabes de mi")
+                || m.contains("quien soy")
+                || m.contains("quién soy")
+                || m.contains("recuerdas");
+    }
+    
+    private String formatMemoryAnswer(
+            String question,
+            UserMemoryDTO memory) {
+
+        String key = memory.memoryKey();
+
+        if (key.contains("self:nombre")) {
+            return "Te llamas " + memory.memoryValue() + ".";
+        }
+
+        if (key.contains("self:fecha_nacimiento")) {
+            return "Naciste el " + memory.memoryValue() + ".";
+        }
+
+        if (key.contains("pareja:nombre")) {
+            return "Tu pareja se llama " + memory.memoryValue() + ".";
+        }
+
+        return memory.memoryValue();
     }
 }

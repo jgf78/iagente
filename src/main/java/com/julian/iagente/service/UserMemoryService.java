@@ -484,6 +484,7 @@ public class UserMemoryService {
             case "fecha_de_nacimiento", "cumpleaños" -> "fecha_nacimiento";
             case "lugar_de_residencia", "residencia", "vive_en" -> "ciudad";
             case "aficiones", "hobbies", "hobby", "hobbie" -> "gustos";
+            case "llamo", "llaman", "llama" -> "nombre";
             default -> a;
         };
     }
