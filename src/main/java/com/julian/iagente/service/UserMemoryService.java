@@ -6,11 +6,13 @@ import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -25,14 +27,14 @@ public class UserMemoryService {
     private static final Logger log = LoggerFactory.getLogger(UserMemoryService.class);
 
     private final ChatClient chatClient;
-    private final UserMemoryRepository repo;
+    private final UserMemoryRepository userMemoryRepository;
     private final ObjectMapper objectMapper;
 
     private final Map<String, String> childIdentityCache = new ConcurrentHashMap<>();
 
     public UserMemoryService(ChatClient chatClient, UserMemoryRepository repo, ObjectMapper objectMapper) {
         this.chatClient = chatClient;
-        this.repo = repo;
+        this.userMemoryRepository = repo;
         this.objectMapper = objectMapper;
     }
 
@@ -50,30 +52,126 @@ public class UserMemoryService {
             "self", "pareja", "hijo"
     );
 
+    @Async
     public void extractAndSave(String userId, String message) {
 
         String response = chatClient.prompt()
                 .system("""
-                        Eres un extractor de memoria estructurada.
+                        Eres un extractor de memoria estructurada para un asistente personal.
 
-                        REGLAS OBLIGATORIAS:
-                        - Devuelve ÚNICAMENTE JSON válido
-                        - NO expliques nada
-                        - NO texto adicional
-                        - NO markdown
-                        - NO frases tipo "claro", "aquí tienes"
-                        - SIEMPRE devuelve una lista JSON
+                        Tu única función es detectar INFORMACIÓN NUEVA que el usuario está proporcionando y convertirla en memoria.
 
-                        FORMATO OBLIGATORIO:
+                        IMPORTANTE:
+                        NO respondas al usuario.
+                        NO intentes resolver preguntas.
+                        NO busques información existente.
+                        NO completes datos que no aparecen explícitamente.
+
+                        --------------------------------------------------
+                        REGLA PRINCIPAL
+                        --------------------------------------------------
+
+                        Solo debes extraer memoria cuando el usuario está AFIRMANDO un dato nuevo.
+
+                        Ejemplos válidos:
+
+                        Usuario:
+                        "Mi pareja se llama Mercedes"
+
+                        Respuesta:
+                        [
+                          {
+                            "subject": "pareja",
+                            "attribute": "nombre",
+                            "value": "Mercedes"
+                          }
+                        ]
+
+
+                        Usuario:
+                        "Mi pareja nació el 20 de mayo de 1980"
+
+                        Respuesta:
+                        [
+                          {
+                            "subject": "pareja",
+                            "attribute": "fecha_nacimiento",
+                            "value": "20 de mayo de 1980"
+                          }
+                        ]
+
+
+                        --------------------------------------------------
+                        NO EXTRAER EN ESTOS CASOS
+                        --------------------------------------------------
+
+                        Si el usuario pregunta, solicita, consulta o intenta recuperar información existente devuelve siempre [].
+
+                        Ejemplos:
+
+                        Usuario:
+                        "cuando nació mi pareja?"
+
+                        Respuesta:
+                        []
+
+
+                        Usuario:
+                        "como se llama mi pareja?"
+
+                        Respuesta:
+                        []
+
+
+                        Usuario:
+                        "qué edad tengo?"
+
+                        Respuesta:
+                        []
+
+
+                        Usuario:
+                        "recuérdame mis datos"
+
+                        Respuesta:
+                        []
+
+
+                        --------------------------------------------------
+                        REGLAS OBLIGATORIAS DE EXTRACCIÓN
+                        --------------------------------------------------
+
+                        - Extrae únicamente datos presentes literalmente en el mensaje.
+                        - Nunca inventes valores.
+                        - Nunca uses valores genéricos.
+                        - Nunca uses "string".
+                        - Nunca uses ejemplos del formato como valores reales.
+                        - Si falta el valor del dato devuelve [].
+                        - Una pregunta nunca genera memoria.
+
+                        --------------------------------------------------
+                        FORMATO DE RESPUESTA
+                        --------------------------------------------------
+
+                        Devuelve ÚNICAMENTE JSON válido.
+
+                        Siempre devuelve una lista JSON.
+
+                        Formato:
+
                         [
                           {
                             "subject": "self|pareja|hijo",
                             "attribute": "nombre|edad|ciudad|gustos|fecha_nacimiento|trabajo",
-                            "value": "string"
+                            "value": "valor real extraído del mensaje"
                           }
                         ]
 
-                        Si no hay memoria útil devuelve: []
+
+                        Si no existe información nueva devuelve exactamente:
+
+                        []
+
                         """)
                 .user(message)
                 .call()
@@ -165,12 +263,12 @@ public class UserMemoryService {
             return;
         }
 
-        repo.findByUserIdAndMemoryKey(userId, key).ifPresentOrElse(existing -> {
+        userMemoryRepository.findByUserIdAndMemoryKey(userId, key).ifPresentOrElse(existing -> {
 
             log.info("MEMORY UPDATE -> {} : {} -> {}", key, existing.getMemoryValue(), value);
 
             existing.setMemoryValue(value);
-            repo.save(existing);
+            userMemoryRepository.save(existing);
 
         }, () -> {
 
@@ -182,19 +280,19 @@ public class UserMemoryService {
                     .memoryValue(value)
                     .build();
 
-            repo.save(memory);
+            userMemoryRepository.save(memory);
         });
     }
 
     public List<UserMemoryDTO> getMemory(String userId) {
-        return repo.findByUserId(userId)
+        return userMemoryRepository.findByUserId(userId)
                 .stream()
                 .map(m -> new UserMemoryDTO(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
     }
 
     private boolean isRedundant(String userId, String key, String newValue) {
-        return repo.findByUserIdAndMemoryKey(userId, key)
+        return userMemoryRepository.findByUserIdAndMemoryKey(userId, key)
                 .map(existing -> existing.getMemoryValue().equalsIgnoreCase(newValue))
                 .orElse(false);
     }
@@ -285,5 +383,193 @@ public class UserMemoryService {
         if (value == null) return true;
         if (value.matches(".*\\d{4}-\\d{4}.*")) return true;
         return false;
+    }
+
+    public Optional<UserMemoryDTO> findBestMatch(String userId, String message) {
+
+        if (userId == null || message == null || message.isBlank()) {
+            return Optional.empty();
+        }
+
+        List<UserMemory> memories = userMemoryRepository.findByUserId(userId);
+
+        if (memories.isEmpty()) {
+            return Optional.empty();
+        }
+
+        UserMemory bestMatch = null;
+        int bestScore = 0;
+
+
+        for (UserMemory memory : memories) {
+
+            int score = calculateMemoryScore(message, memory);
+
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = memory;
+            }
+        }
+
+
+        if (bestMatch == null || bestScore < 2) {
+            return Optional.empty();
+        }
+
+
+        return Optional.of(
+                new UserMemoryDTO(
+                        bestMatch.getMemoryKey(),
+                        bestMatch.getMemoryValue()
+                )
+        );
+    }
+    
+    private int calculateMemoryScore(String message, UserMemory memory) {
+
+        String text = message.toLowerCase();
+        String key = memory.getMemoryKey().toLowerCase();
+
+        int score = 0;
+
+
+        /*
+         * 1. Analizar partes de la key
+         */
+        String[] keyParts = key.split(":");
+
+
+        for (String part : keyParts) {
+
+            if (part.equals("persona")) {
+                continue;
+            }
+
+            if (text.contains(part)) {
+
+                switch (part) {
+
+                    case "fecha_nacimiento":
+                        score += 10;
+                        break;
+
+                    case "nombre":
+                        score += 8;
+                        break;
+
+                    case "edad":
+                        score += 7;
+                        break;
+
+                    case "gustos":
+                        score += 5;
+                        break;
+
+                    case "trabajo":
+                        score += 5;
+                        break;
+
+                    default:
+                        score += 2;
+                }
+            }
+        }
+
+
+        /*
+         * 2. Detección de atributo por lenguaje natural
+         */
+
+        if (key.contains("fecha_nacimiento")) {
+
+            if (text.contains("fecha")
+                    || text.contains("nació")
+                    || text.contains("nacio")
+                    || text.contains("nacimiento")
+                    || text.contains("cumpleaños")
+                    || text.contains("cumple")) {
+
+                score += 15;
+            }
+        }
+
+
+        if (key.contains("gustos")) {
+
+            if (text.contains("gusto")
+                    || text.contains("gustos")
+                    || text.contains("gusta")
+                    || text.contains("aficiones")
+                    || text.contains("hobby")
+                    || text.contains("hobbie")) {
+
+                score += 10;
+            }
+        }
+
+
+        /*
+         * 3. Detección del sujeto
+         */
+
+        boolean self = 
+                text.contains("yo")
+                || text.contains("mi ")
+                || text.contains("mis")
+                || text.contains("tengo");
+
+
+        if (self && key.contains("persona:self")) {
+            score += 20;
+        }
+
+
+        boolean pareja =
+                text.contains("pareja")
+                || text.contains("mujer")
+                || text.contains("novia")
+                || text.contains("esposa");
+
+
+        if (pareja && key.contains("persona:pareja")) {
+            score += 20;
+        }
+
+
+        boolean hijo =
+                text.contains("hijo")
+                || text.contains("hija");
+
+
+        if (hijo && key.contains("persona:hijo")) {
+            score += 20;
+        }
+
+
+        /*
+         * 4. Penalizaciones para evitar falsos positivos
+         */
+
+        // Si pregunta por uno mismo no queremos pareja/hijos
+        if (self && !pareja && !hijo) {
+
+            if (key.contains("persona:pareja")
+                    || key.contains("persona:hijo")) {
+                score -= 10;
+            }
+        }
+
+
+        // Si pregunta por pareja no queremos sus hijos
+        if (pareja && !hijo) {
+
+            if (key.contains("persona:hijo")) {
+                score -= 15;
+            }
+        }
+
+
+        return score;
     }
 }

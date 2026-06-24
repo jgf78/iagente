@@ -89,9 +89,6 @@ public class AgentService {
 
         userMemoryService.extractAndSave(userId, message);
 
-        List<ChatMessage> history =
-                chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
-
         // ==========================
         // GREETINGS
         // ==========================
@@ -116,19 +113,32 @@ public class AgentService {
         // ==========================
         // PERSONALITY BOT
         // ==========================
-        String personalityBlock = getPersonalityBotByUserId(userId);
+        String personalityBlock = "";
+
+        if (decision.useLlm()) {
+            personalityBlock =
+                    getPersonalityBotByUserId(userId);
+        }
 
         // ==========================
         // MEMORY
         // ==========================
-        List<UserMemoryDTO> memories = userMemoryService.getMemory(userId);
+        List<String> memoryList = List.of();
 
-        List<String> memoryList = memories.stream()
-                .map(m -> toNaturalMemory(m.memoryKey(), m.memoryValue()))
-                .toList();
+        if (decision.useMemory()) {
+
+            List<UserMemoryDTO> memories =
+                    userMemoryService.getMemory(userId);
+
+            memoryList = memories.stream()
+                    .map(m -> toNaturalMemory(
+                            m.memoryKey(),
+                            m.memoryValue()))
+                    .toList();
+
+            log.info("MEMORY FOUND -> {}", memoryList);
+        }
         
-        log.info("MEMORY FOUND -> {}", memoryList);
-
         // ==========================
         // WEB 
         // ==========================
@@ -174,18 +184,34 @@ public class AgentService {
         // ==========================
         // HISTORY
         // ==========================
-        List<String> historyList =
-                history.stream()
-                        .filter(m -> USER.equals(m.getRole()))
-                        .map(ChatMessage::getContent)
-                        .toList();
+        List<String> historyList = new ArrayList<>();
+        
+        if (decision.useLlm()) {
 
-        log.info("HISTORY -> {}", historyList);
+            List<ChatMessage> history =
+                    chatRepo.findTop10ByUserIdOrderByCreatedAtDesc(userId);
+            
+            historyList =
+                    history.stream()
+                            .filter(m -> USER.equals(m.getRole()))
+                            .map(ChatMessage::getContent)
+                            .toList();
 
+            log.info("HISTORY -> {}", historyList);
+
+        }
+        
         // ==========================
         // SAFE CONTEXT BUILD
         // ==========================
-        String context = buildContext(memoryList, webList, historyList);
+        String context = "";
+
+        if (decision.useLlm()) {
+            context = buildContext(
+                    memoryList,
+                    webList,
+                    historyList);
+        }
 
         // ==========================
         // SAFETY FALLBACK 
@@ -208,8 +234,20 @@ public class AgentService {
         // ==========================
         // LLM CALL
         // ==========================
-        String response = callLLM(message, personalityBlock, toolList, context);
+        String response = "";
+        
+        if (decision.useMemory() && !decision.useLlm()) {
 
+            Optional<UserMemoryDTO> result =
+                    userMemoryService.findBestMatch(
+                            userId,
+                            message);
+
+            return result
+                    .map(UserMemoryDTO::memoryValue)
+                    .orElse("No lo sé");
+        }else response = callLLM(message, personalityBlock, toolList, context);
+        
         save(userId, ASSISTANT, response);
 
         return response;
