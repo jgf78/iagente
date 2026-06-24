@@ -2,6 +2,8 @@ package com.julian.iagente.service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +27,7 @@ import com.julian.iagente.model.WebResult;
 import com.julian.iagente.repository.ChatMessageRepository;
 import com.julian.iagente.service.tool.CalendarService;
 import com.julian.iagente.service.tool.WeatherService;
+import com.julian.iagente.util.ToolUtils;
 
 @Service
 public class AgentService {
@@ -32,18 +35,6 @@ public class AgentService {
     private static final String ASSISTANT = "assistant";
 
     private static final String USER = "user";
-
-    private static final String TOOL_CALENDAR = "CALENDAR";
-
-    private static final String TOOL_WEATHER = "WEATHER";
-    
-    private static final String TOOL_REMINDER = "REMINDER";
-    
-    private static final String TOOL_TODO = "TODO";
-    
-    private static final String TOOL_TODO_LIST = "TODO_LIST";
-    
-    private static final String TOOL_TODO_COMPLETE = "TODO_COMPLETE";
 
     private static final Logger log =
             LoggerFactory.getLogger(AgentService.class);
@@ -163,6 +154,8 @@ public class AgentService {
         toolTodoList(decision, toolList, userId);
         
         toolTodoComplete(message, decision, toolList, userId);
+        
+        toolTime(decision, toolList);
 
         // ==========================
         // TOOL BYPASS
@@ -239,8 +232,9 @@ public class AgentService {
                 Formato de salida de las fechas dd/MM/yyyy hh:mm
                 
                 FECHA SISTEMA:
-                - Fecha completa: %s
+                - Fecha actual: %s
                 - Año actual: %s
+                - Uso horario Madrid/Europa
                 
                 REGLAS:
                 - TOOL > ALL
@@ -287,7 +281,7 @@ public class AgentService {
     }
 
     private void toolCalendar(String message, RouteDecision decision, List<String> toolList) {
-        if (TOOL_CALENDAR.equals(decision.tool())) {
+        if (ToolUtils.TOOL_CALENDAR.equals(decision.tool())) {
 
             String rawDate = clean(decision.toolInput());
 
@@ -302,7 +296,7 @@ public class AgentService {
     }
 
     private void toolWeather(RouteDecision decision, List<String> toolList) {
-        if (TOOL_WEATHER.equals(decision.tool())) {
+        if (ToolUtils.TOOL_WEATHER.equals(decision.tool())) {
 
             String city = extractCity(decision.toolInput());
 
@@ -321,7 +315,7 @@ public class AgentService {
             List<String> toolList,
             String userId) {
 
-        if (TOOL_REMINDER.equals(decision.tool())) {
+        if (ToolUtils.TOOL_REMINDER.equals(decision.tool())) {
         
             log.info("REMINDER TOOL INPUT -> {}", decision.toolInput());
             
@@ -433,7 +427,7 @@ public class AgentService {
             List<String> toolList,
             String userId) {
 
-        if (TOOL_TODO_LIST.equals(decision.tool())) {
+        if (ToolUtils.TOOL_TODO_LIST.equals(decision.tool())) {
         
             log.info("TODO LIST TOOL");
             
@@ -462,7 +456,7 @@ public class AgentService {
             List<String> toolList,
             String userId) {
 
-        if (TOOL_TODO.equals(decision.tool())) {
+        if (ToolUtils.TOOL_TODO.equals(decision.tool())) {
         
             log.info("TODO TOOL INPUT -> {}", decision.toolInput());
             
@@ -510,7 +504,7 @@ public class AgentService {
             List<String> toolList,
             String userId) {
 
-    if (TOOL_TODO_COMPLETE.equals(decision.tool())) {
+    if (ToolUtils.TOOL_TODO_COMPLETE.equals(decision.tool())) {
     
         String task = normalizeTodoText(decision.toolInput());
         
@@ -534,6 +528,24 @@ public class AgentService {
          }
     }
 }
+    
+    private void toolTime(
+            RouteDecision decision,
+            List<String> toolList) {
+
+        if (ToolUtils.TOOL_TIME.equals(decision.tool())) {
+
+            String time =
+                    ZonedDateTime.now(
+                        ZoneId.of("Europe/Madrid"))
+                    .format(
+                        DateTimeFormatter.ofPattern(
+                            "HH:mm"));
+
+            toolList.add(
+                "Son las " + time);
+        }
+    }    
     
     private void websearch(String message, RouteDecision decision, List<String> webList, boolean isPersonalQuestion) {
         if (decision.useWeb() && !isPersonalQuestion) {

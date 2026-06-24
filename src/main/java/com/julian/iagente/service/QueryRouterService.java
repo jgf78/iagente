@@ -6,9 +6,12 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
 import com.julian.iagente.model.RouteDecision;
+import com.julian.iagente.util.ToolUtils;
 
 @Service
 public class QueryRouterService {
+
+    private static final String NONE = "NONE";
 
     private static final Logger log = LoggerFactory.getLogger(QueryRouterService.class);
 
@@ -34,7 +37,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "NONE",
+                    NONE,
                     ""
             );
 
@@ -55,7 +58,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "WEATHER",
+                    ToolUtils.TOOL_WEATHER,
                     message
             );
 
@@ -77,7 +80,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "CALENDAR",
+                    ToolUtils.TOOL_CALENDAR,
                     message
             );
 
@@ -98,7 +101,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "REMINDER",
+                    ToolUtils.TOOL_REMINDER,
                     message
             );
 
@@ -117,7 +120,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "TODO",
+                    ToolUtils.TOOL_TODO,
                     message
             );
 
@@ -139,7 +142,7 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "TODO_LIST",
+                    ToolUtils.TOOL_TODO_LIST,
                     message
             );
 
@@ -160,16 +163,35 @@ public class QueryRouterService {
                     false,
                     false,
                     "",
-                    "TODO_COMPLETE",
+                    ToolUtils.TOOL_TODO_COMPLETE,
                     message
             );
 
             log.info("ROUTER TODO_COMPLETE DECISION -> {}", decision);
             return decision;
         }
+        
+        // =========================
+        // 8. TIME
+        // =========================
+        
+        if (msg.contains("que hora es")) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    false,
+                    false,
+                    "",
+                    ToolUtils.TOOL_TIME,
+                    message
+            );
+
+            log.info("ROUTER TIME DECISION -> {}", decision);
+            return decision;
+        }
 
         // =========================
-        // 8. LLM ROUTER
+        // 9. LLM ROUTER
         // =========================
         RouteDecision decision = chatClient.prompt()
                 .system("""
@@ -213,6 +235,10 @@ public class QueryRouterService {
                         TODO_COMPLETE TOOL:
                         tool = TODO_COMPLETE
                         toolInput = mensaje
+                        
+                        TIME TOOL:
+                        tool = TIME
+                        toolInput = ""
 
                         WEB:
                         SOLO para información externa o actual:
