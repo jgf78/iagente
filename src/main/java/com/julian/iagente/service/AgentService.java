@@ -86,6 +86,20 @@ public class AgentService {
         log.info("==================================================");
 
         save(userId, USER, message);
+        
+         // ==========================
+         // MATH BYPASS
+         // ==========================
+         if (isMathExpression(message)) {
+    
+             String result = calculate(message);
+    
+             log.info("MATH BYPASS -> {} = {}", message, result);
+    
+             save(userId, ASSISTANT, result);
+    
+             return result;
+         }
 
         boolean memoryResult = userMemoryService.extractAndSave(userId, message);
         
@@ -802,5 +816,166 @@ public class AgentService {
                 .replace("he terminado", "")
                 .replace("ya hice", "")
                 .trim();
+    }
+    
+    private boolean isMathExpression(String message) {
+
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+
+        String value = message.trim();
+
+        return value.matches("[0-9+\\-*/().\\s]+");
+    }
+    
+    private String calculate(String expression) {
+
+        try {
+
+            String clean = expression
+                    .replace(" ", "");
+
+            double result = evaluate(clean);
+
+            if (result == (long) result) {
+                return String.valueOf((long) result);
+            }
+
+            return String.valueOf(result);
+
+        } catch (Exception e) {
+
+            log.error("MATH ERROR -> {}", expression, e);
+
+            return "No puedo calcular esa expresión.";
+        }
+    }
+    
+    private double evaluate(String expression) {
+
+        return new Object() {
+
+            int pos = -1;
+            int ch;
+
+            void nextChar() {
+                ch = (++pos < expression.length())
+                        ? expression.charAt(pos)
+                        : -1;
+            }
+
+            boolean eat(int charToEat) {
+
+                while (ch == ' ') {
+                    nextChar();
+                }
+
+                if (ch == charToEat) {
+                    nextChar();
+                    return true;
+                }
+
+                return false;
+            }
+
+            double parse() {
+
+                nextChar();
+
+                double x = parseExpression();
+
+                if (pos < expression.length()) {
+                    throw new RuntimeException(
+                            "Carácter inesperado: " + (char) ch);
+                }
+
+                return x;
+            }
+
+
+            double parseExpression() {
+
+                double x = parseTerm();
+
+                while (true) {
+
+                    if (eat('+')) {
+                        x += parseTerm();
+
+                    } else if (eat('-')) {
+                        x -= parseTerm();
+
+                    } else {
+                        return x;
+                    }
+                }
+            }
+
+
+            double parseTerm() {
+
+                double x = parseFactor();
+
+                while (true) {
+
+                    if (eat('*')) {
+                        x *= parseFactor();
+
+                    } else if (eat('/')) {
+
+                        double divisor = parseFactor();
+
+                        if (divisor == 0) {
+                            throw new ArithmeticException(
+                                    "División por cero");
+                        }
+
+                        x /= divisor;
+
+                    } else {
+                        return x;
+                    }
+                }
+            }
+
+
+            double parseFactor() {
+
+                if (eat('+')) {
+                    return parseFactor();
+                }
+
+                if (eat('-')) {
+                    return -parseFactor();
+                }
+
+                double x;
+
+                int startPos = this.pos;
+
+                if (eat('(')) {
+
+                    x = parseExpression();
+                    eat(')');
+
+                } else {
+
+                    while ((ch >= '0' && ch <= '9')
+                            || ch == '.') {
+
+                        nextChar();
+                    }
+
+                    x = Double.parseDouble(
+                            expression.substring(
+                                    startPos,
+                                    this.pos));
+                }
+
+                return x;
+            }
+
+        }.parse();
     }
 }
