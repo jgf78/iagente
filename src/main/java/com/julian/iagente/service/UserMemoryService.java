@@ -12,7 +12,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,8 +51,9 @@ public class UserMemoryService {
             "self", "pareja", "hijo"
     );
 
-    @Async
-    public void extractAndSave(String userId, String message) {
+    public boolean extractAndSave(String userId, String message) {
+
+        boolean saved = false;
 
         String response = chatClient.prompt()
                 .system("""
@@ -73,7 +73,38 @@ public class UserMemoryService {
 
                         Solo debes extraer memoria cuando el usuario está AFIRMANDO un dato nuevo.
 
-                        Ejemplos válidos:
+                        Una pregunta o consulta NUNCA debe generar memoria.
+
+                        --------------------------------------------------
+                        PATRONES DE INFORMACIÓN NUEVA (MUY IMPORTANTE)
+                        --------------------------------------------------
+
+                        Si el usuario usa estas expresiones, SIEMPRE debes extraer memoria:
+
+                        SELF (usuario):
+                        - "mi nombre es ..."
+                        - "me llamo ..."
+                        - "soy ..."
+                        - "vivo en ..."
+                        - "trabajo como ..."
+                        - "tengo ... años"
+
+                        PAREJA:
+                        - "mi pareja se llama ..."
+                        - "mi pareja nació ..."
+                        - "mi mujer se llama ..."
+                        - "mi novia se llama ..."
+                        - "mi esposa se llama ..."
+
+                        HIJOS:
+                        - "mi hijo se llama ..."
+                        - "mi hija se llama ..."
+                        - "mi hijo nació ..."
+                        - "mi hija nació ..."
+
+                        --------------------------------------------------
+                        EJEMPLOS VÁLIDOS
+                        --------------------------------------------------
 
                         Usuario:
                         "Mi pareja se llama Mercedes"
@@ -87,7 +118,6 @@ public class UserMemoryService {
                           }
                         ]
 
-
                         Usuario:
                         "Mi pareja nació el 20 de mayo de 1980"
 
@@ -100,6 +130,41 @@ public class UserMemoryService {
                           }
                         ]
 
+                        Usuario:
+                        "mi nombre es Julián Gómez Fernández"
+
+                        Respuesta:
+                        [
+                          {
+                            "subject": "self",
+                            "attribute": "nombre",
+                            "value": "Julián Gómez Fernández"
+                          }
+                        ]
+
+                        Usuario:
+                        "vivo en Madrid"
+
+                        Respuesta:
+                        [
+                          {
+                            "subject": "self",
+                            "attribute": "ciudad",
+                            "value": "Madrid"
+                          }
+                        ]
+
+                        Usuario:
+                        "trabajo como ingeniero de software"
+
+                        Respuesta:
+                        [
+                          {
+                            "subject": "self",
+                            "attribute": "trabajo",
+                            "value": "ingeniero de software"
+                          }
+                        ]
 
                         --------------------------------------------------
                         NO EXTRAER EN ESTOS CASOS
@@ -115,13 +180,11 @@ public class UserMemoryService {
                         Respuesta:
                         []
 
-
                         Usuario:
                         "como se llama mi pareja?"
 
                         Respuesta:
                         []
-
 
                         Usuario:
                         "qué edad tengo?"
@@ -129,13 +192,11 @@ public class UserMemoryService {
                         Respuesta:
                         []
 
-
                         Usuario:
                         "recuérdame mis datos"
 
                         Respuesta:
                         []
-
 
                         --------------------------------------------------
                         REGLAS OBLIGATORIAS DE EXTRACCIÓN
@@ -148,6 +209,7 @@ public class UserMemoryService {
                         - Nunca uses ejemplos del formato como valores reales.
                         - Si falta el valor del dato devuelve [].
                         - Una pregunta nunca genera memoria.
+                        - Si el mensaje contiene interrogación o es una pregunta, devuelve [].
 
                         --------------------------------------------------
                         FORMATO DE RESPUESTA
@@ -167,7 +229,6 @@ public class UserMemoryService {
                           }
                         ]
 
-
                         Si no existe información nueva devuelve exactamente:
 
                         []
@@ -177,70 +238,119 @@ public class UserMemoryService {
                 .call()
                 .content();
 
+
         log.info("MEMORY EXTRACTOR RESPONSE -> {}", response);
+
 
         try {
 
             if (response == null || response.isBlank()) {
-                return;
+                return false;
             }
+
 
             String json = extractJsonArray(response);
 
             if (json == null) {
                 log.warn("MEMORY SKIPPED -> response is not valid JSON array");
-                return;
+                return false;
             }
+
 
             List<MemoryItem> memories = objectMapper.readValue(
                     json,
                     new TypeReference<List<MemoryItem>>() {}
             );
 
+
             for (MemoryItem m : memories) {
 
-                if (m == null) continue;
+                if (m == null) {
+                    continue;
+                }
+
 
                 String subject = normalizeSubject(m.subject);
-                String attribute = normalizeAttribute(m.attribute);
+
+                String attribute =
+                        normalizeAttribute(m.attribute);
+
 
                 if (!ALLOWED_ATTRIBUTES.contains(attribute)) {
                     log.warn("REJECTED ATTRIBUTE -> {}", attribute);
                     continue;
                 }
 
+
                 if (attribute.contains("|")) {
                     log.warn("REJECTED MULTI ATTRIBUTE -> {}", attribute);
                     continue;
                 }
 
-                String value = m.value == null ? null : m.value.trim();
 
-                if (isBlank(subject) || isBlank(attribute) || isBlank(value)) {
-                    log.warn("REJECTED EMPTY MEMORY -> subject={}, attribute={}, value={}",
-                            subject, attribute, value);
+                String value =
+                        m.value == null ? null : m.value.trim();
+
+
+                if (isBlank(subject)
+                        || isBlank(attribute)
+                        || isBlank(value)) {
+
+                    log.warn(
+                        "REJECTED EMPTY MEMORY -> subject={}, attribute={}, value={}",
+                        subject,
+                        attribute,
+                        value);
+
                     continue;
                 }
+
 
                 if (!ALLOWED_SUBJECTS.contains(subject)) {
+
                     log.warn("REJECTED SUBJECT -> {}", subject);
+
                     continue;
                 }
+
 
                 if (isInvalidValue(value)) {
+
                     log.warn("REJECTED VALUE -> {}", value);
+
                     continue;
                 }
 
-                String normalizedSubject = resolveChildSubject(userId, m, message);
 
-                save(userId, normalizedSubject, attribute, value);
+                String normalizedSubject =
+                        resolveChildSubject(
+                                userId,
+                                m,
+                                message);
+
+
+                boolean memorySaved =
+                        save(
+                            userId,
+                            normalizedSubject,
+                            attribute,
+                            value);
+
+
+                saved = saved || memorySaved;
             }
 
+
         } catch (Exception e) {
+
             log.error("ERROR PARSING MEMORY");
             log.error("RAW RESPONSE -> {}", response, e);
+
+            return false;
         }
+
+
+        return saved;
     }
 
     private String extractJsonArray(String response) {
@@ -254,34 +364,43 @@ public class UserMemoryService {
         return response.substring(start, end + 1);
     }
 
-    public void save(String userId, String subject, String attribute, String value) {
+    public boolean save(String userId, String subject, String attribute, String value) {
 
         String key = "persona:" + subject + ":" + attribute;
 
         if (isRedundant(userId, key, value)) {
             log.info("MEMORY REDUNDANT -> {}={}", key, value);
-            return;
+            return false;
         }
 
-        userMemoryRepository.findByUserIdAndMemoryKey(userId, key).ifPresentOrElse(existing -> {
+        return userMemoryRepository.findByUserIdAndMemoryKey(userId, key)
+                .map(existing -> {
 
-            log.info("MEMORY UPDATE -> {} : {} -> {}", key, existing.getMemoryValue(), value);
+                    log.info("MEMORY UPDATE -> {} : {} -> {}",
+                            key,
+                            existing.getMemoryValue(),
+                            value);
 
-            existing.setMemoryValue(value);
-            userMemoryRepository.save(existing);
+                    existing.setMemoryValue(value);
+                    userMemoryRepository.save(existing);
 
-        }, () -> {
+                    return true;
 
-            log.info("MEMORY INSERT -> {} = {}", key, value);
+                })
+                .orElseGet(() -> {
 
-            UserMemory memory = UserMemory.builder()
-                    .userId(userId)
-                    .memoryKey(key)
-                    .memoryValue(value)
-                    .build();
+                    log.info("MEMORY INSERT -> {} = {}", key, value);
 
-            userMemoryRepository.save(memory);
-        });
+                    UserMemory memory = UserMemory.builder()
+                            .userId(userId)
+                            .memoryKey(key)
+                            .memoryValue(value)
+                            .build();
+
+                    userMemoryRepository.save(memory);
+
+                    return true;
+                });
     }
 
     public List<UserMemoryDTO> getMemory(String userId) {

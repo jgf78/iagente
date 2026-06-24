@@ -317,6 +317,9 @@ public class QueryRouterService {
                 || msg.contains("cuantos años")
                 || msg.contains("qué edad")
                 || msg.contains("cuando naci")
+                || msg.contains("mi nombre")
+                || msg.contains("mi edad")
+                || msg.contains("mi cumpleaños")
                 || msg.contains("como se llama mi");
     }
 }

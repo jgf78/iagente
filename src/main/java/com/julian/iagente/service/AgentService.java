@@ -87,7 +87,19 @@ public class AgentService {
 
         save(userId, USER, message);
 
-        userMemoryService.extractAndSave(userId, message);
+        boolean memoryResult = userMemoryService.extractAndSave(userId, message);
+        
+        if (memoryResult) {
+
+            String response =
+                    "Perfecto, lo guardaré en mi memoria.";
+
+            log.info("MEMORY CONFIRMATION -> {}", response);
+
+            save(userId, ASSISTANT, response);
+
+            return response;
+        }
 
         // ==========================
         // GREETINGS
