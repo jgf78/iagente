@@ -1,5 +1,6 @@
 package com.julian.iagente.service;
 
+import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -991,14 +992,14 @@ public class AgentService {
     
     private boolean isMemoryQuestion(String message) {
 
-        String m = message.toLowerCase();
+        String m = Normalizer.normalize(message, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .replaceAll("[^a-z0-9\\s]", "");
 
         return m.contains("como me llamo")
-                || m.contains("cómo me llamo")
-                || m.contains("qué sabes de mí")
                 || m.contains("que sabes de mi")
                 || m.contains("quien soy")
-                || m.contains("quién soy")
                 || m.contains("recuerdas");
     }
     
