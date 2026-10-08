@@ -25,7 +25,9 @@ public class QueryRouterService {
 
         log.info("ROUTER INPUT -> {}", message);
 
-        String msg = message.toLowerCase();
+        String msg = normalizeMessage(message);
+
+        log.info("ROUTER NORMALIZED INPUT -> {}", msg);
 
         // =========================
         // 1. MEMORY FAST ROUTE (PRIORIDAD REAL)
@@ -72,7 +74,6 @@ public class QueryRouterService {
         if (msg.contains("agenda")
                 || msg.contains("calendario")
                 || msg.contains("evento")
-                || msg.contains("reunión")
                 || msg.contains("reunion")) {
 
             RouteDecision decision = new RouteDecision(
@@ -87,7 +88,7 @@ public class QueryRouterService {
             log.info("ROUTER CALENDAR DECISION -> {}", decision);
             return decision;
         }
-        
+
         // =========================
         // 4. REMINDER TOOL
         // =========================
@@ -108,7 +109,7 @@ public class QueryRouterService {
             log.info("ROUTER REMINDER DECISION -> {}", decision);
             return decision;
         }
-        
+
         // =========================
         // 5. TODO TOOL
         // =========================
@@ -127,11 +128,10 @@ public class QueryRouterService {
             log.info("ROUTER TODO DECISION -> {}", decision);
             return decision;
         }
-        
+
         // =========================
         // 6. TODO_LIST TOOL
         // =========================
-        
         if (msg.contains("que tareas tengo ")
                 || msg.contains("tareas pendientes")
                 || msg.contains("mis tareas")
@@ -146,14 +146,13 @@ public class QueryRouterService {
                     message
             );
 
-            log.info("ROUTER TODO DECISION -> {}", decision);
+            log.info("ROUTER TODO_LIST DECISION -> {}", decision);
             return decision;
         }
-        
+
         // =========================
-        // 7. TODO_LIST TOOL
+        // 7. TODO_COMPLETE TOOL
         // =========================
-        
         if (msg.contains("marca la tarea ")
                 || msg.contains("comprar")
                 || msg.contains("completada la tarea")) {
@@ -170,11 +169,10 @@ public class QueryRouterService {
             log.info("ROUTER TODO_COMPLETE DECISION -> {}", decision);
             return decision;
         }
-        
+
         // =========================
         // 8. TIME
         // =========================
-        
         if (msg.contains("que hora es")) {
 
             RouteDecision decision = new RouteDecision(
@@ -191,7 +189,25 @@ public class QueryRouterService {
         }
 
         // =========================
-        // 9. LLM ROUTER
+        // 9. WEB - ACTUALIDAD / DEPORTES
+        // =========================
+        if (isWebQuery(msg)) {
+
+            RouteDecision decision = new RouteDecision(
+                    false,
+                    true,
+                    true,
+                    message,
+                    NONE,
+                    ""
+            );
+
+            log.info("ROUTER WEB FAST DECISION -> {}", decision);
+            return decision;
+        }
+
+        // =========================
+        // 10. LLM ROUTER
         // =========================
         RouteDecision decision = chatClient.prompt()
                 .system("""
@@ -219,23 +235,23 @@ public class QueryRouterService {
                         CALENDAR TOOL:
                         tool = CALENDAR
                         toolInput = fecha (YYYY-MM-DD)
-                        
+
                         REMINDER TOOL:
                         tool = REMINDER
                         toolInput = fecha (YYYY-MM-DD HH:mm)
-                        
+
                         TODO TOOL:
                         tool = TODO
                         toolInput = mensaje
-                        
+
                         TODO_LIST TOOL:
                         tool = TODO_LIST
                         toolInput = ""
-                        
+
                         TODO_COMPLETE TOOL:
                         tool = TODO_COMPLETE
                         toolInput = mensaje
-                        
+
                         TIME TOOL:
                         tool = TIME
                         toolInput = ""
@@ -254,7 +270,8 @@ public class QueryRouterService {
                         - noticias musicales
                         - precios actuales
                         - eventos recientes
-                        - que dia es hoy, que dia de la semana es hoy
+                        - que dia es hoy
+                        - que dia de la semana es hoy
 
                         Si hay duda → WEB
 
@@ -281,9 +298,13 @@ public class QueryRouterService {
                 .call()
                 .entity(RouteDecision.class);
 
-        // fallback webQuery vacío
-        if (decision != null && decision.useWeb()
-                && (decision.webQuery() == null || decision.webQuery().isBlank())) {
+        // =========================
+        // FALLBACK WEB QUERY VACIO
+        // =========================
+        if (decision != null
+                && decision.useWeb()
+                && (decision.webQuery() == null
+                || decision.webQuery().isBlank())) {
 
             log.warn("WEB QUERY NULL -> fallback message");
 
@@ -303,7 +324,52 @@ public class QueryRouterService {
     }
 
     // =========================
-    // MEMORY DETECTOR 
+    // NORMALIZACION
+    // =========================
+    private String normalizeMessage(String message) {
+
+        if (message == null) {
+            return "";
+        }
+
+        return java.text.Normalizer
+                .normalize(message, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .replaceAll("[^a-z0-9\\s]", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    // =========================
+    // WEB DETECTOR
+    // =========================
+    private boolean isWebQuery(String msg) {
+
+        return msg.contains("noticia")
+                || msg.contains("noticias")
+                || msg.contains("actualidad")
+                || msg.contains("actual")
+                || msg.contains("ahora")
+                || msg.contains("hoy")
+                || msg.contains("reciente")
+                || msg.contains("recientemente")
+                || msg.contains("proximo")
+                || msg.contains("proxima")
+                || msg.contains("proximamente")
+                || msg.contains("partido")
+                || msg.contains("partidos")
+                || msg.contains("juega")
+                || msg.contains("jugar")
+                || msg.contains("resultado")
+                || msg.contains("resultados")
+                || msg.contains("elecciones")
+                || msg.contains("precio")
+                || msg.contains("precios");
+    }
+
+    // =========================
+    // MEMORY DETECTOR
     // =========================
     private boolean isPersonalQuery(String msg) {
 
@@ -314,12 +380,12 @@ public class QueryRouterService {
                 || msg.contains("mi pareja")
                 || msg.contains("tengo")
                 || msg.contains("vivo en")
-                || msg.contains("cuantos años")
-                || msg.contains("qué edad")
+                || msg.contains("cuantos anos")
+                || msg.contains("que edad")
                 || msg.contains("cuando naci")
                 || msg.contains("mi nombre")
                 || msg.contains("mi edad")
-                || msg.contains("mi cumpleaños")
+                || msg.contains("mi cumpleanos")
                 || msg.contains("como se llama mi");
     }
 }

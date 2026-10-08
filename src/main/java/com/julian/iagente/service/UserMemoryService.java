@@ -409,6 +409,80 @@ public class UserMemoryService {
                 .map(m -> new UserMemoryDTO(m.getMemoryKey(), m.getMemoryValue()))
                 .toList();
     }
+    
+    public String buildPersonalityPrompt(String userId) {
+
+        if (userId == null || userId.isBlank()) {
+            return "";
+        }
+
+        try {
+
+            List<UserMemoryDTO> memories =
+                    getMemory(userId);
+
+            if (memories.isEmpty()) {
+                return "";
+            }
+
+            StringBuilder prompt =
+                    new StringBuilder();
+
+            prompt.append("""
+                    =====================================
+                    PERSONALIDAD Y DATOS DEL USUARIO
+                    =====================================
+
+                    Utiliza estos datos únicamente cuando sean
+                    relevantes para responder al usuario.
+
+                    """);
+
+            for (UserMemoryDTO memory : memories) {
+
+                if (memory == null) {
+                    continue;
+                }
+
+                String key =
+                        memory.memoryKey();
+
+                String value =
+                        memory.memoryValue();
+
+                if (key == null
+                        || key.isBlank()
+                        || value == null
+                        || value.isBlank()) {
+
+                    continue;
+                }
+
+                prompt.append("- ")
+                        .append(key)
+                        .append(": ")
+                        .append(value)
+                        .append("\n");
+            }
+
+            prompt.append("""
+                    
+                    =====================================
+                    FIN DATOS DEL USUARIO
+                    =====================================
+                    """);
+
+            return prompt.toString();
+
+        } catch (Exception e) {
+
+            log.warn(
+                    "ERROR BUILDING PERSONALITY PROMPT",
+                    e);
+
+            return "";
+        }
+    }
 
     private boolean isRedundant(String userId, String key, String newValue) {
         return userMemoryRepository.findByUserIdAndMemoryKey(userId, key)
