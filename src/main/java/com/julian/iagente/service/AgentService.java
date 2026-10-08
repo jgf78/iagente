@@ -658,14 +658,13 @@ public class AgentService {
 
     private boolean isAPersonalQuestion(String message) {
 
-        String m = message.toLowerCase();
+        String m = normalizeMessage(message);
 
         return m.contains("mi ")
                 || m.contains("me llamo")
                 || m.contains("como me llamo")
-                || m.contains("cómo me llamo")
                 || m.contains("quien soy")
-                || m.contains("qué sabes de mí")
+                || m.contains("que sabes de mi")
                 || m.contains("pareja")
                 || m.contains("hijo");
     }
@@ -776,12 +775,12 @@ public class AgentService {
     
     private boolean isSmallTalk(String message) {
 
-        String m = message.toLowerCase();
+        String m = normalizeMessage(message);
 
         return m.contains("hola")
-            || m.contains("qué tal")
-            || m.contains("como estás")
-            || m.contains("buenos días")
+            || m.contains("que tal")
+            || m.contains("como estas")
+            || m.contains("buenos dias")
             || m.contains("buenos noches")
             || m.contains("buenas tardes");
     }
@@ -992,15 +991,20 @@ public class AgentService {
     
     private boolean isMemoryQuestion(String message) {
 
-        String m = Normalizer.normalize(message, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .toLowerCase()
-                .replaceAll("[^a-z0-9\\s]", "");
+        String m = normalizeMessage(message);
 
         return m.contains("como me llamo")
                 || m.contains("que sabes de mi")
                 || m.contains("quien soy")
                 || m.contains("recuerdas");
+    }
+
+    private String normalizeMessage(String message) {
+        String m = Normalizer.normalize(message, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase()
+                .replaceAll("[^a-z0-9\\s]", "");
+        return m;
     }
     
     private String formatMemoryAnswer(
