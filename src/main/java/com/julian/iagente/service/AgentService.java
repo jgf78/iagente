@@ -183,20 +183,22 @@ public class AgentService {
                 new ArrayList<>();
 
         if (decision.useMemory()) {
-
             try {
-
                 Optional<UserMemoryDTO> memory =
                         userMemoryService.findBestMatch(
                                 userId,
                                 message);
 
-                memory.ifPresent(m ->
-                        memoryList.add(
-                                m.toString()));
+                log.info("MEMORY FOUND -> {}", memory);
+
+                memory.ifPresent(m -> {
+                    log.info("MEMORY KEY -> {}", m.memoryKey());
+                    log.info("MEMORY VALUE -> {}", m.memoryValue());
+
+                    memoryList.add(m.memoryValue());
+                });
 
             } catch (Exception e) {
-
                 log.warn(
                         "MEMORY SEARCH ERROR",
                         e);
